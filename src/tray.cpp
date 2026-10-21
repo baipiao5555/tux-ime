@@ -2,18 +2,26 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstdlib>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
-#include <iterator>
 #include <memory>
 #include <string>
 #include <thread>
 #include <windows.h>
 #include <windowsx.h>
 
+#include <d3d11.h>
+#include <imgui.h>
+#include <imgui_impl_dx11.h>
+#include <imgui_impl_win32.h>
+
 #include "clipboard_sync.h"
 #include "server.h"
 #include "settings.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
+    HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace tuxime {
 
@@ -27,26 +35,8 @@ constexpr int kIdSettings = 1001;
 constexpr int kIdSyncNow = 1002;
 constexpr int kIdReload = 1003;
 constexpr int kIdExit = 1004;
-
-constexpr int kIdDefaultIm = 2001;
-constexpr int kIdPageSize = 2002;
-constexpr int kIdFuzzyZ = 2010;
-constexpr int kIdFuzzyC = 2011;
-constexpr int kIdFuzzyS = 2012;
-constexpr int kIdFuzzyL = 2013;
-constexpr int kIdFuzzyAn = 2014;
-constexpr int kIdFuzzyEn = 2015;
-constexpr int kIdFuzzyIn = 2016;
-constexpr int kIdFuzzyF = 2017;
-constexpr int kIdSyncEnabled = 2020;
-constexpr int kIdSyncUrl = 2021;
-constexpr int kIdSyncUser = 2022;
-constexpr int kIdSyncPassword = 2023;
-constexpr int kIdTest = 2030;
-constexpr int kIdSyncNowButton = 2031;
-constexpr int kIdApply = 2040;
-constexpr int kIdClose = 2041;
-constexpr int kIdStatus = 2050;
+constexpr int kIdChinese = 1005;
+constexpr int kIdEnglish = 1006;
 
 std::wstring toWide(const std::string &text) {
     if (text.empty()) {
@@ -74,7 +64,25 @@ std::string toUtf8(const std::wstring &text) {
     return result;
 }
 
-int systemDpi() {
+void copyText(char *destination, size_t size, const std::string &text) {
+    if (size == 0) {
+        return;
+    }
+    const size_t length = (std::min)(text.size(), size - 1);
+    std::memcpy(destination, text.data(), length);
+    destination[length] = '\0';
+}
+
+int windowDpi(HWND hwnd) {
+    using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
+    static auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
+        GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
+    if (getDpiForWindow && hwnd) {
+        const UINT dpi = getDpiForWindow(hwnd);
+        if (dpi) {
+            return static_cast<int>(dpi);
+        }
+    }
     HDC screen = GetDC(nullptr);
     const int dpi = GetDeviceCaps(screen, LOGPIXELSX);
     ReleaseDC(nullptr, screen);
@@ -107,51 +115,44 @@ struct TrayIcon::Impl {
 class SettingsWindow {
 public:
     explicit SettingsWindow(TrayIcon::Impl &tray) : tray_(tray) {}
-    ~SettingsWindow() {
-        if (hwnd_) {
-            DestroyWindow(hwnd_);
-            hwnd_ = nullptr;
-        }
-        if (font_) {
-            DeleteObject(font_);
-        }
-    }
+    ~SettingsWindow();
 
     bool create();
     void show();
     void setStatus(const std::wstring &status);
 
 private:
-    int s(int value) const { return MulDiv(value, dpi_, 96); }
-    void createControls();
+    bool createDevice();
+    void destroyDevice();
+    void createRenderTarget();
+    void destroyRenderTarget();
     void loadValues();
-    PinyinSettings readPinyin() const;
-    SyncConfig readSync() const;
-    void updateSyncEnabled();
+    void drawUi();
     void apply();
     void test();
     void syncNow();
-    void setControlText(HWND control, const std::wstring &text) const;
-    std::wstring controlText(HWND control) const;
-    HWND make(const wchar_t *className, const wchar_t *text, DWORD style,
-              int x, int y, int width, int height, int id,
-              DWORD exStyle = 0);
+    void render();
+    void hide();
 
     static LRESULT CALLBACK proc(HWND hwnd, UINT message, WPARAM wParam,
                                  LPARAM lParam);
 
     TrayIcon::Impl &tray_;
     HWND hwnd_ = nullptr;
-    int dpi_ = 96;
-    HFONT font_ = nullptr;
-    HWND defaultIm_ = nullptr;
-    HWND pageSize_ = nullptr;
-    HWND fuzzy_[8] = {};
-    HWND syncEnabled_ = nullptr;
-    HWND syncUrl_ = nullptr;
-    HWND syncUser_ = nullptr;
-    HWND syncPassword_ = nullptr;
-    HWND status_ = nullptr;
+    ID3D11Device *device_ = nullptr;
+    ID3D11DeviceContext *context_ = nullptr;
+    IDXGISwapChain *swapChain_ = nullptr;
+    ID3D11RenderTargetView *renderTarget_ = nullptr;
+    bool occluded_ = false;
+    ImGuiContext *imgui_ = nullptr;
+
+    PinyinSettings pinyin_;
+    SyncConfig sync_;
+    char url_[2048] = {};
+    char username_[256] = {};
+    char password_[256] = {};
+    int page_ = 0;
+    std::wstring status_;
 };
 
 void TrayIcon::Impl::run() {
@@ -250,6 +251,9 @@ void TrayIcon::Impl::updateStatus(const std::wstring &status) {
 
 void TrayIcon::Impl::showMenu() {
     HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, kIdChinese, L"切换到中文（拼音）");
+    AppendMenuW(menu, MF_STRING, kIdEnglish, L"切换到英文");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kIdSettings, L"设置...");
     AppendMenuW(menu, MF_STRING, kIdSyncNow, L"立即同步剪贴板");
     AppendMenuW(menu, MF_STRING, kIdReload, L"重新加载配置");
@@ -308,6 +312,14 @@ LRESULT CALLBACK TrayIcon::Impl::trayProc(HWND hwnd, UINT message,
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
+        case kIdChinese:
+            self->server.switchInputMethod(true);
+            self->updateStatus(L"已切换到中文（拼音）");
+            return 0;
+        case kIdEnglish:
+            self->server.switchInputMethod(false);
+            self->updateStatus(L"已切换到英文");
+            return 0;
         case kIdSettings:
             self->showSettings();
             return 0;
@@ -336,7 +348,24 @@ LRESULT CALLBACK TrayIcon::Impl::trayProc(HWND hwnd, UINT message,
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
+SettingsWindow::~SettingsWindow() {
+    hide();
+    if (imgui_) {
+        ImGui_ImplDX11_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext(imgui_);
+        imgui_ = nullptr;
+    }
+    destroyDevice();
+    if (hwnd_) {
+        DestroyWindow(hwnd_);
+        hwnd_ = nullptr;
+    }
+}
+
 bool SettingsWindow::create() {
+    ImGui_ImplWin32_EnableDpiAwareness();
+
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     constexpr wchar_t settingsClass[] = L"TuxImeSettingsWindow";
     static bool registered = false;
@@ -348,8 +377,6 @@ bool SettingsWindow::create() {
         windowClass.hCursor = LoadCursorW(
             nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
         windowClass.lpszClassName = settingsClass;
-        windowClass.hbrBackground =
-            reinterpret_cast<HBRUSH>(COLOR_3DFACE + 1);
         registered = RegisterClassExW(&windowClass) != 0 ||
                      GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }
@@ -359,275 +386,430 @@ bool SettingsWindow::create() {
 
     hwnd_ = CreateWindowExW(
         0, settingsClass, L"Tux IME 设置", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, s(660), s(470), nullptr, nullptr,
-        instance, this);
-    return hwnd_ != nullptr;
+        CW_USEDEFAULT, CW_USEDEFAULT, 820, 740, nullptr, nullptr, instance,
+        this);
+    if (!hwnd_) {
+        return false;
+    }
+    if (!createDevice()) {
+        DestroyWindow(hwnd_);
+        hwnd_ = nullptr;
+        return false;
+    }
+
+    imgui_ = ImGui::CreateContext();
+    ImGuiIO &io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    const float scale = static_cast<float>(windowDpi(hwnd_)) / 96.0f;
+    ImGui::StyleColorsLight();
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.ChildRounding = 10.0f;
+    style.FrameRounding = 6.0f;
+    style.GrabRounding = 6.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.WindowBorderSize = 0.0f;
+    style.ChildBorderSize = 1.0f;
+    style.FramePadding = ImVec2(10.0f, 6.0f);
+    style.ItemSpacing = ImVec2(10.0f, 10.0f);
+    style.Colors[ImGuiCol_Text] = ImVec4(0.12f, 0.13f, 0.16f, 1.0f);
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.95f, 0.96f, 0.97f, 1.0f);
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+    style.Colors[ImGuiCol_Border] = ImVec4(0.85f, 0.87f, 0.90f, 1.0f);
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.92f, 0.94f, 0.97f, 1.0f);
+    style.Colors[ImGuiCol_FrameBgHovered] =
+        ImVec4(0.86f, 0.90f, 0.96f, 1.0f);
+    style.Colors[ImGuiCol_FrameBgActive] =
+        ImVec4(0.80f, 0.86f, 0.95f, 1.0f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.20f, 0.45f, 0.82f, 1.0f);
+    style.Colors[ImGuiCol_ButtonHovered] =
+        ImVec4(0.25f, 0.52f, 0.90f, 1.0f);
+    style.Colors[ImGuiCol_ButtonActive] =
+        ImVec4(0.16f, 0.38f, 0.72f, 1.0f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.20f, 0.45f, 0.82f, 0.18f);
+    style.Colors[ImGuiCol_HeaderHovered] =
+        ImVec4(0.20f, 0.45f, 0.82f, 0.28f);
+    style.Colors[ImGuiCol_HeaderActive] =
+        ImVec4(0.20f, 0.45f, 0.82f, 0.38f);
+    style.Colors[ImGuiCol_TextSelectedBg] =
+        ImVec4(0.20f, 0.45f, 0.82f, 0.30f);
+    style.ScaleAllSizes(scale);
+
+    ImFont *font = io.Fonts->AddFontFromFileTTF(
+        "C:\\Windows\\Fonts\\msyh.ttc", 17.0f * scale, nullptr,
+        io.Fonts->GetGlyphRangesChineseFull());
+    if (!font) {
+        io.Fonts->AddFontDefault();
+    }
+
+    ImGui_ImplWin32_Init(hwnd_);
+    ImGui_ImplDX11_Init(device_, context_);
+
+    loadValues();
+    SetTimer(hwnd_, 1, 16, nullptr);
+    return true;
+}
+
+bool SettingsWindow::createDevice() {
+    DXGI_SWAP_CHAIN_DESC description{};
+    description.BufferCount = 2;
+    description.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    description.OutputWindow = hwnd_;
+    description.SampleDesc.Count = 1;
+    description.Windowed = TRUE;
+    description.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0,
+                                        D3D_FEATURE_LEVEL_10_0};
+    D3D_FEATURE_LEVEL level{};
+    HRESULT result = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
+        D3D11_SDK_VERSION, &description, &swapChain_, &device_, &level,
+        &context_);
+    if (FAILED(result)) {
+        result = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2,
+            D3D11_SDK_VERSION, &description, &swapChain_, &device_, &level,
+            &context_);
+    }
+    if (FAILED(result)) {
+        return false;
+    }
+    createRenderTarget();
+    return renderTarget_ != nullptr;
+}
+
+void SettingsWindow::destroyDevice() {
+    destroyRenderTarget();
+    if (swapChain_) {
+        swapChain_->Release();
+        swapChain_ = nullptr;
+    }
+    if (context_) {
+        context_->Release();
+        context_ = nullptr;
+    }
+    if (device_) {
+        device_->Release();
+        device_ = nullptr;
+    }
+}
+
+void SettingsWindow::createRenderTarget() {
+    ID3D11Texture2D *backBuffer = nullptr;
+    if (SUCCEEDED(swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D),
+                                        reinterpret_cast<void **>(&backBuffer))) &&
+        backBuffer) {
+        device_->CreateRenderTargetView(backBuffer, nullptr, &renderTarget_);
+        backBuffer->Release();
+    }
+}
+
+void SettingsWindow::destroyRenderTarget() {
+    if (renderTarget_) {
+        renderTarget_->Release();
+        renderTarget_ = nullptr;
+    }
+}
+
+void SettingsWindow::loadValues() {
+    pinyin_ = SettingsStore::loadPinyin();
+    sync_ = SettingsStore::loadSync();
+    copyText(url_, sizeof(url_), sync_.serverUrl);
+    copyText(username_, sizeof(username_), sync_.username);
+    copyText(password_, sizeof(password_), sync_.password);
+    status_ = L"就绪";
 }
 
 void SettingsWindow::show() {
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
+    SetTimer(hwnd_, 1, 16, nullptr);
+}
+
+void SettingsWindow::hide() {
+    if (hwnd_) {
+        KillTimer(hwnd_, 1);
+        ShowWindow(hwnd_, SW_HIDE);
+    }
 }
 
 void SettingsWindow::setStatus(const std::wstring &status) {
-    if (status_) {
-        SetWindowTextW(status_, status.c_str());
-    }
-}
-
-HWND SettingsWindow::make(const wchar_t *className, const wchar_t *text,
-                          DWORD style, int x, int y, int width, int height,
-                          int id, DWORD exStyle) {
-    HWND control = CreateWindowExW(
-        exStyle, className, text, WS_CHILD | WS_VISIBLE | style, s(x), s(y),
-        s(width), s(height), hwnd_,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
-        GetModuleHandleW(nullptr), nullptr);
-    if (control && font_) {
-        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font_),
-                     TRUE);
-    }
-    return control;
-}
-
-void SettingsWindow::createControls() {
-    dpi_ = systemDpi();
-    font_ = CreateFontW(-MulDiv(9, dpi_, 72), 0, 0, 0, FW_NORMAL, FALSE,
-                        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                        DEFAULT_PITCH | FF_DONTCARE,
-                        L"Microsoft YaHei UI");
-
-    make(L"BUTTON", L"输入法", BS_GROUPBOX, 15, 10, 610, 170, 0);
-    make(L"STATIC", L"默认输入法:", SS_LEFT, 30, 38, 95, 22, 0);
-    defaultIm_ = make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 130,
-                      34, 180, 200, kIdDefaultIm);
-    SendMessageW(defaultIm_, CB_ADDSTRING, 0,
-                 reinterpret_cast<LPARAM>(L"中文（拼音）"));
-    SendMessageW(defaultIm_, CB_ADDSTRING, 0,
-                 reinterpret_cast<LPARAM>(L"英文"));
-    SendMessageW(defaultIm_, CB_SETCURSEL, 0, 0);
-
-    make(L"STATIC", L"每页候选:", SS_LEFT, 350, 38, 90, 22, 0);
-    pageSize_ = make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 445,
-                     34, 80, 200, kIdPageSize);
-    for (const wchar_t *size : {L"5", L"7", L"9"}) {
-        SendMessageW(pageSize_, CB_ADDSTRING, 0,
-                     reinterpret_cast<LPARAM>(size));
-    }
-    SendMessageW(pageSize_, CB_SETCURSEL, 1, 0);
-
-    make(L"STATIC", L"模糊拼音:", SS_LEFT, 30, 68, 90, 22, 0);
-    fuzzy_[0] = make(L"BUTTON", L"zh / z", BS_AUTOCHECKBOX, 30, 92, 120, 22,
-                     kIdFuzzyZ);
-    fuzzy_[1] = make(L"BUTTON", L"ch / c", BS_AUTOCHECKBOX, 220, 92, 120, 22,
-                     kIdFuzzyC);
-    fuzzy_[2] = make(L"BUTTON", L"sh / s", BS_AUTOCHECKBOX, 410, 92, 120, 22,
-                     kIdFuzzyS);
-    fuzzy_[3] = make(L"BUTTON", L"n / l", BS_AUTOCHECKBOX, 30, 118, 120, 22,
-                     kIdFuzzyL);
-    fuzzy_[4] = make(L"BUTTON", L"an / ang", BS_AUTOCHECKBOX, 220, 118, 120,
-                     22, kIdFuzzyAn);
-    fuzzy_[5] = make(L"BUTTON", L"en / eng", BS_AUTOCHECKBOX, 410, 118, 120,
-                     22, kIdFuzzyEn);
-    fuzzy_[6] = make(L"BUTTON", L"in / ing", BS_AUTOCHECKBOX, 30, 144, 120,
-                     22, kIdFuzzyIn);
-    fuzzy_[7] = make(L"BUTTON", L"f / h", BS_AUTOCHECKBOX, 220, 144, 120, 22,
-                     kIdFuzzyF);
-
-    make(L"BUTTON", L"剪贴板同步", BS_GROUPBOX, 15, 190, 610, 180, 0);
-    syncEnabled_ = make(L"BUTTON", L"启用剪贴板同步", BS_AUTOCHECKBOX, 30, 215,
-                        180, 22, kIdSyncEnabled);
-    make(L"STATIC", L"服务器:", SS_LEFT, 30, 245, 70, 22, 0);
-    syncUrl_ = make(L"EDIT", L"", ES_AUTOHSCROLL, 105, 241, 490, 24,
-                    kIdSyncUrl, WS_EX_CLIENTEDGE);
-    make(L"STATIC", L"用户名:", SS_LEFT, 30, 275, 70, 22, 0);
-    syncUser_ = make(L"EDIT", L"", ES_AUTOHSCROLL, 105, 271, 180, 24,
-                     kIdSyncUser, WS_EX_CLIENTEDGE);
-    make(L"STATIC", L"密码:", SS_LEFT, 305, 275, 60, 22, 0);
-    syncPassword_ = make(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL, 365, 271,
-                         230, 24, kIdSyncPassword, WS_EX_CLIENTEDGE);
-    make(L"BUTTON", L"测试连接", BS_PUSHBUTTON, 30, 305, 100, 28, kIdTest);
-    make(L"BUTTON", L"立即同步", BS_PUSHBUTTON, 145, 305, 100, 28,
-         kIdSyncNowButton);
-    status_ = make(L"STATIC", L"就绪", SS_LEFT, 30, 340, 560, 22, kIdStatus);
-
-    make(L"BUTTON", L"应用", BS_PUSHBUTTON, 435, 390, 85, 30, kIdApply);
-    make(L"BUTTON", L"关闭", BS_PUSHBUTTON, 530, 390, 85, 30, kIdClose);
-
-    loadValues();
-}
-
-void SettingsWindow::loadValues() {
-    const PinyinSettings pinyin = SettingsStore::loadPinyin();
-    SendMessageW(defaultIm_, CB_SETCURSEL, pinyin.keyboardDefault ? 1 : 0,
-                 0);
-
-    int pageIndex = SendMessageW(pageSize_, CB_FINDSTRINGEXACT, -1,
-                                 reinterpret_cast<LPARAM>(
-                                     std::to_wstring(pinyin.pageSize).c_str()));
-    if (pageIndex == CB_ERR) {
-        const std::wstring value = std::to_wstring(pinyin.pageSize);
-        pageIndex = static_cast<int>(SendMessageW(
-            pageSize_, CB_ADDSTRING, 0,
-            reinterpret_cast<LPARAM>(value.c_str())));
-    }
-    SendMessageW(pageSize_, CB_SETCURSEL, pageIndex, 0);
-
-    const BOOL checks[] = {
-        pinyin.fuzzyZ, pinyin.fuzzyC, pinyin.fuzzyS, pinyin.fuzzyL,
-        pinyin.fuzzyAn, pinyin.fuzzyEn, pinyin.fuzzyIn, pinyin.fuzzyF};
-    for (int i = 0; i < 8; ++i) {
-        SendMessageW(fuzzy_[i], BM_SETCHECK,
-                     checks[i] ? BST_CHECKED : BST_UNCHECKED, 0);
-    }
-
-    const SyncConfig sync = SettingsStore::loadSync();
-    SendMessageW(syncEnabled_, BM_SETCHECK,
-                 sync.enabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    setControlText(syncUrl_, toWide(sync.serverUrl));
-    setControlText(syncUser_, toWide(sync.username));
-    setControlText(syncPassword_, toWide(sync.password));
-    updateSyncEnabled();
-}
-
-PinyinSettings SettingsWindow::readPinyin() const {
-    PinyinSettings settings;
-    settings.keyboardDefault =
-        SendMessageW(defaultIm_, CB_GETCURSEL, 0, 0) == 1;
-    const int pageIndex =
-        static_cast<int>(SendMessageW(pageSize_, CB_GETCURSEL, 0, 0));
-    wchar_t buffer[16] = {};
-    SendMessageW(pageSize_, CB_GETLBTEXT, pageIndex,
-                 reinterpret_cast<LPARAM>(buffer));
-    settings.pageSize = std::clamp(_wtoi(buffer), 3, 10);
-    settings.fuzzyZ =
-        SendMessageW(fuzzy_[0], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyC =
-        SendMessageW(fuzzy_[1], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyS =
-        SendMessageW(fuzzy_[2], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyL =
-        SendMessageW(fuzzy_[3], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyAn =
-        SendMessageW(fuzzy_[4], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyEn =
-        SendMessageW(fuzzy_[5], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyIn =
-        SendMessageW(fuzzy_[6], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    settings.fuzzyF =
-        SendMessageW(fuzzy_[7], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    return settings;
-}
-
-SyncConfig SettingsWindow::readSync() const {
-    SyncConfig config;
-    config.enabled =
-        SendMessageW(syncEnabled_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    config.serverUrl = toUtf8(controlText(syncUrl_));
-    config.username = toUtf8(controlText(syncUser_));
-    config.password = toUtf8(controlText(syncPassword_));
-    return config;
-}
-
-void SettingsWindow::updateSyncEnabled() {
-    const bool enabled =
-        SendMessageW(syncEnabled_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    EnableWindow(syncUrl_, enabled);
-    EnableWindow(syncUser_, enabled);
-    EnableWindow(syncPassword_, enabled);
+    status_ = status;
 }
 
 void SettingsWindow::apply() {
-    const PinyinSettings pinyin = readPinyin();
-    const SyncConfig sync = readSync();
-    SettingsStore::savePinyin(pinyin);
-    SettingsStore::saveSync(sync);
-    tray_.server.applySettings(pinyin, sync);
-    setStatus(L"设置已保存");
+    sync_.serverUrl = url_;
+    sync_.username = username_;
+    sync_.password = password_;
+    SettingsStore::savePinyin(pinyin_);
+    SettingsStore::saveSync(sync_);
+    tray_.server.applySettings(pinyin_, sync_);
+    status_ = L"设置已保存";
 }
 
 void SettingsWindow::test() {
-    setStatus(L"正在测试连接...");
-    UpdateWindow(hwnd_);
-    const SyncConfig sync = readSync();
-    setStatus(tray_.server.clipboardSync().testConnection(sync));
+    SyncConfig config;
+    config.enabled = sync_.enabled;
+    config.serverUrl = url_;
+    config.username = username_;
+    config.password = password_;
+    status_ = L"正在测试连接...";
+    status_ = tray_.server.clipboardSync().testConnection(config);
 }
 
 void SettingsWindow::syncNow() {
-    const SyncConfig sync = readSync();
-    SettingsStore::saveSync(sync);
-    tray_.server.clipboardSync().updateConfig(sync);
-    if (sync.enabled) {
-        tray_.server.clipboardSync().trigger();
-        setStatus(L"已请求同步");
+    sync_.serverUrl = url_;
+    sync_.username = username_;
+    sync_.password = password_;
+    SettingsStore::saveSync(sync_);
+    tray_.server.clipboardSync().updateConfig(sync_);
+    if (!sync_.enabled) {
+        status_ = L"请先启用剪贴板同步";
+        return;
+    }
+    tray_.server.clipboardSync().trigger();
+    status_ = L"已请求同步";
+}
+
+void SettingsWindow::drawUi() {
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##tux-settings", nullptr, flags);
+    ImGui::PopStyleVar();
+
+    const float scale = static_cast<float>(windowDpi(hwnd_)) / 96.0f;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,
+                          ImVec4(0.12f, 0.34f, 0.62f, 1.0f));
+    ImGui::BeginChild("##header", ImVec2(0, 76.0f * scale), false);
+    ImGui::SetCursorPos(ImVec2(24.0f * scale, 16.0f * scale));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+    ImGui::TextUnformatted("Tux IME");
+    ImGui::SetCursorPos(ImVec2(24.0f * scale, 42.0f * scale));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.82f, 0.89f, 1.0f, 1.0f));
+    ImGui::TextUnformatted("Fcitx5 输入法 / 设置");
+    ImGui::PopStyleColor(2);
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+
+    ImGui::BeginChild("##body", ImVec2(0, 0), false);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,
+                          ImVec4(0.93f, 0.95f, 0.98f, 1.0f));
+    ImGui::BeginChild("##nav", ImVec2(180.0f * scale, 0), false);
+    ImGui::Dummy(ImVec2(0, 10.0f * scale));
+    const char *tabs[] = {"输入法", "剪贴板同步", "关于"};
+    for (int i = 0; i < 3; ++i) {
+        const bool selected = page_ == i;
+        if (selected) {
+            ImGui::PushStyleColor(ImGuiCol_Header,
+                                  ImVec4(0.20f, 0.45f, 0.82f, 0.22f));
+        }
+        ImGui::SetCursorPosX(10.0f * scale);
+        if (ImGui::Selectable(tabs[i], selected, 0,
+                              ImVec2(150.0f * scale, 34.0f * scale))) {
+            page_ = i;
+        }
+        if (selected) {
+            ImGui::PopStyleColor();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+
+    ImGui::BeginChild("##right", ImVec2(0, 0), false);
+    const float footerHeight = 72.0f * scale;
+    ImGui::BeginChild("##content", ImVec2(0, -footerHeight), false);
+    ImGui::Dummy(ImVec2(0, 6.0f * scale));
+    if (page_ == 0) {
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f),
+                           "输入法");
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 4.0f * scale));
+        ImGui::TextUnformatted("默认输入法");
+        if (ImGui::RadioButton("中文（拼音）", !pinyin_.keyboardDefault)) {
+            pinyin_.keyboardDefault = false;
+        }
+        ImGui::SameLine(180.0f * scale);
+        if (ImGui::RadioButton("英文", pinyin_.keyboardDefault)) {
+            pinyin_.keyboardDefault = true;
+        }
+        ImGui::TextDisabled(
+            "安装后如果只能输入英文，请选择“中文（拼音）”，然后应用。");
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+
+        ImGui::TextUnformatted("每页候选数");
+        ImGui::SetNextItemWidth(180.0f * scale);
+        ImGui::SliderInt("##page-size", &pinyin_.pageSize, 3, 10);
+
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::TextUnformatted("模糊拼音");
+        ImGui::TextDisabled("选中后，相近读音会一起参与匹配。");
+        if (ImGui::BeginTable("##fuzzy", 3,
+                              ImGuiTableFlags_SizingStretchSame)) {
+            const struct {
+                const char *label;
+                bool *value;
+            } options[] = {
+                {"zh / z", &pinyin_.fuzzyZ},
+                {"ch / c", &pinyin_.fuzzyC},
+                {"sh / s", &pinyin_.fuzzyS},
+                {"n / l", &pinyin_.fuzzyL},
+                {"an / ang", &pinyin_.fuzzyAn},
+                {"en / eng", &pinyin_.fuzzyEn},
+                {"in / ing", &pinyin_.fuzzyIn},
+                {"f / h", &pinyin_.fuzzyF},
+            };
+            for (const auto &option : options) {
+                ImGui::TableNextColumn();
+                ImGui::Checkbox(option.label, option.value);
+            }
+            ImGui::EndTable();
+        }
+    } else if (page_ == 1) {
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f),
+                           "剪贴板同步");
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 4.0f * scale));
+        ImGui::Checkbox("启用剪贴板同步", &sync_.enabled);
+        ImGui::TextDisabled(
+            "使用 SyncClipboard HTTP 协议同步文本；密码用 Windows DPAPI 保存。");
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+
+        ImGui::TextUnformatted("服务器地址");
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::InputTextWithHint("##sync-url", "https://example.com",
+                                 url_, sizeof(url_));
+        ImGui::TextDisabled(
+            "只允许 http/https，拒绝本机、环回、私有和保留地址。");
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
+
+        ImGui::TextUnformatted("用户名");
+        ImGui::SetNextItemWidth(260.0f * scale);
+        ImGui::InputText("##sync-user", username_, sizeof(username_));
+        ImGui::SameLine();
+        ImGui::TextUnformatted("密码");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(220.0f * scale);
+        ImGui::InputText("##sync-pass", password_, sizeof(password_),
+                         ImGuiInputTextFlags_Password);
+
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        if (ImGui::Button("测试连接")) {
+            test();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("立即同步")) {
+            syncNow();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("建议使用 HTTPS");
     } else {
-        setStatus(L"请先启用剪贴板同步");
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
+        ImGui::TextUnformatted("Tux IME 0.2.2");
+        ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
+                            "fcitx5-chinese-addons 5.1.15");
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
+        ImGui::TextUnformatted(
+            "独立 TSF 输入法，不与小狼毫共用 CLSID、DLL 或管道。");
+        ImGui::TextUnformatted(
+            "项目地址：https://github.com/baipiao5555/tux-ime");
     }
+
+    ImGui::EndChild();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.35f, 0.40f, 0.48f, 1.0f), "%s",
+                       toUtf8(status_).c_str());
+    ImGui::SameLine();
+    const float buttonWidth = 92.0f * scale;
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - buttonWidth * 2.0f -
+                         42.0f * scale);
+    if (ImGui::Button("应用", ImVec2(buttonWidth, 34.0f * scale))) {
+        apply();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("关闭", ImVec2(buttonWidth, 34.0f * scale))) {
+        hide();
+    }
+    ImGui::EndChild();
+    ImGui::EndChild();
+    ImGui::End();
 }
 
-void SettingsWindow::setControlText(HWND control,
-                                    const std::wstring &text) const {
-    if (control) {
-        SetWindowTextW(control, text.c_str());
+void SettingsWindow::render() {
+    if (!hwnd_ || !imgui_ || !device_ || !context_ || !swapChain_ ||
+        !renderTarget_) {
+        return;
     }
-}
+    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+    drawUi();
+    ImGui::Render();
 
-std::wstring SettingsWindow::controlText(HWND control) const {
-    wchar_t buffer[4096] = {};
-    if (control) {
-        GetWindowTextW(control, buffer, static_cast<int>(std::size(buffer)));
-    }
-    return buffer;
+    const float clear[4] = {0.95f, 0.96f, 0.97f, 1.0f};
+    context_->OMSetRenderTargets(1, &renderTarget_, nullptr);
+    context_->ClearRenderTargetView(renderTarget_, clear);
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+    const HRESULT result = swapChain_->Present(1, 0);
+    occluded_ = result == DXGI_STATUS_OCCLUDED;
 }
 
 LRESULT CALLBACK SettingsWindow::proc(HWND hwnd, UINT message,
                                        WPARAM wParam, LPARAM lParam) {
     auto *self = reinterpret_cast<SettingsWindow *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (ImGui::GetCurrentContext()) {
+        ImGui_ImplWin32_WndProcHandler(hwnd, message, wParam, lParam);
+    }
     if (message == WM_CREATE) {
         self = reinterpret_cast<SettingsWindow *>(
             reinterpret_cast<CREATESTRUCTW *>(lParam)->lpCreateParams);
         self->hwnd_ = hwnd;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA,
                           reinterpret_cast<LONG_PTR>(self));
-        self->createControls();
         return 0;
     }
     if (!self) {
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
-
     switch (message) {
-    case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case kIdApply:
-            self->apply();
-            return 0;
-        case kIdClose:
-            ShowWindow(hwnd, SW_HIDE);
-            return 0;
-        case kIdTest:
-            self->test();
-            return 0;
-        case kIdSyncNowButton:
-            self->syncNow();
-            return 0;
-        case kIdSyncEnabled:
-            self->updateSyncEnabled();
-            return 0;
-        default:
-            break;
+    case WM_SIZE:
+        if (self->device_ && self->swapChain_ && wParam != SIZE_MINIMIZED) {
+            self->destroyRenderTarget();
+            self->swapChain_->ResizeBuffers(
+                0, LOWORD(lParam), HIWORD(lParam), DXGI_FORMAT_UNKNOWN, 0);
+            self->createRenderTarget();
         }
-        break;
-    case WM_CTLCOLORSTATIC:
-        SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-        return reinterpret_cast<LRESULT>(
-            GetSysColorBrush(COLOR_3DFACE));
+        return 0;
+    case WM_TIMER:
+        if (IsWindowVisible(hwnd)) {
+            self->render();
+        } else {
+            KillTimer(hwnd, 1);
+        }
+        return 0;
+    case WM_PAINT:
+        ValidateRect(hwnd, nullptr);
+        return 0;
     case WM_CLOSE:
-        ShowWindow(hwnd, SW_HIDE);
+        self->hide();
         return 0;
     case WM_DESTROY:
+        self->hwnd_ = nullptr;
         return 0;
     default:
         break;

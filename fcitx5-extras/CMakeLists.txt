@@ -18,3 +18,5 @@ install(FILES tuxkeyboard.conf
         DESTINATION "${FCITX_INSTALL_PKGDATADIR}/addon" COMPONENT config)
 install(FILES tux-keyboard.conf
         DESTINATION "${FCITX_INSTALL_PKGDATADIR}/inputmethod" COMPONENT config)
+install(FILES tux-layout.conf
+        DESTINATION "${FCITX_INSTALL_PKGDATADIR}/inputmethod" COMPONENT config)

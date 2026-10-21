@@ -10,3 +10,6 @@
 [submodule "fcitx5-chinese-addons"]
 	path = fcitx5-chinese-addons
 	url = https://github.com/fcitx/fcitx5-chinese-addons
+[submodule "third_party/imgui"]
+	path = third_party/imgui
+	url = https://github.com/ocornut/imgui

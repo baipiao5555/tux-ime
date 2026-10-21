@@ -11,6 +11,8 @@ class TuxKeyboardEngine final : public InputMethodEngine {
 public:
     std::vector<InputMethodEntry> listInputMethods() override {
         std::vector<InputMethodEntry> methods;
+        methods.emplace_back("tux-layout", "Keyboard layout", "us",
+                             "tuxkeyboard");
         methods.emplace_back("tux-keyboard", "English (Tux)", "us",
                              "tuxkeyboard");
         return methods;

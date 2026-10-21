@@ -439,6 +439,17 @@ Server::~Server() {
 }
 
 void Server::setupEnvironment() {
+    using SetDpiAwarenessContextFn = BOOL(WINAPI *)(HANDLE);
+    if (HMODULE user32 = GetModuleHandleW(L"user32.dll")) {
+        auto setContext = reinterpret_cast<SetDpiAwarenessContextFn>(
+            GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
+        if (setContext) {
+            setContext(reinterpret_cast<HANDLE>(-4));
+        } else {
+            SetProcessDPIAware();
+        }
+    }
+
     wchar_t modulePath[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
     const auto root =
@@ -457,8 +468,9 @@ void Server::registerDefaultGroup() {
     const bool keyboardDefault = SettingsStore::loadPinyin().keyboardDefault;
     fcitx::InputMethodGroup group("Default");
     group.setDefaultLayout("us");
-    group.inputMethodList().emplace_back("pinyin");
+    group.inputMethodList().emplace_back("tux-layout");
     group.inputMethodList().emplace_back("tux-keyboard");
+    group.inputMethodList().emplace_back("pinyin");
     group.setDefaultInputMethod(keyboardDefault ? "tux-keyboard" : "pinyin");
     manager.setGroup(std::move(group));
     manager.setCurrentGroup("Default");
@@ -538,6 +550,14 @@ void Server::applySettings(const PinyinSettings &pinyin,
         manager.setDefaultInputMethod(keyboardDefault ? "tux-keyboard"
                                                        : "pinyin");
         manager.save();
+        instance_->setCurrentInputMethod(keyboardDefault ? "tux-keyboard"
+                                                          : "pinyin");
+    });
+}
+
+void Server::switchInputMethod(bool chinese) {
+    runOnFcitxThread([this, chinese]() {
+        instance_->setCurrentInputMethod(chinese ? "pinyin" : "tux-keyboard");
     });
 }
 

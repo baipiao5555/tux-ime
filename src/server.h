@@ -118,6 +118,7 @@ public:
     void removeSession(uint32_t id);
     void applySettings(const PinyinSettings &pinyin,
                        const SyncConfig &sync);
+    void switchInputMethod(bool chinese);
     void requestExit();
 
 private:
