@@ -248,9 +248,11 @@ PinyinSettings SettingsStore::loadPinyin() {
     settings.fuzzyF = boolValue(iniValue(lines, "Fuzzy", "F_H", "False"));
 
     const auto profile = readLines(profilePath());
-    settings.keyboardDefault =
-        iniValue(profile, "Groups/0", "DefaultIM", "pinyin") ==
-        "tux-keyboard";
+    settings.defaultInputMethod =
+        iniValue(profile, "Groups/0", "DefaultIM", "pinyin");
+    if (settings.defaultInputMethod.empty()) {
+        settings.defaultInputMethod = "pinyin";
+    }
     return settings;
 }
 
@@ -294,7 +296,9 @@ void SettingsStore::savePinyin(const PinyinSettings &settings) {
     setIniValue(path, "Fuzzy", "F_H",
                 settings.fuzzyF ? "True" : "False");
     setIniValue(profilePath(), "Groups/0", "DefaultIM",
-                settings.keyboardDefault ? "tux-keyboard" : "pinyin");
+                settings.defaultInputMethod.empty()
+                    ? "pinyin"
+                    : settings.defaultInputMethod);
 }
 
 bool SettingsStore::setIniValue(const std::filesystem::path &path,

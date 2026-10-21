@@ -37,6 +37,30 @@ constexpr int kIdReload = 1003;
 constexpr int kIdExit = 1004;
 constexpr int kIdChinese = 1005;
 constexpr int kIdEnglish = 1006;
+constexpr int kIdInputMethodBase = 1100;
+
+struct InputMethodOption {
+    const char *id;
+    const char *label;
+};
+
+constexpr InputMethodOption kInputMethodOptions[] = {
+    {"pinyin", "中文（拼音）"},   {"shuangpin", "中文（双拼）"},
+    {"wbx", "五笔"},              {"wbpy", "五笔拼音"},
+    {"cangjie", "仓颉"},          {"erbi", "二笔"},
+    {"zrm", "自然码"},            {"qxm", "冰蟾"},
+    {"db", "电报码"},             {"wanfeng", "晚风"},
+    {"tux-keyboard", "英文"},
+};
+
+const char *inputMethodLabel(const std::string &id) {
+    for (const auto &option : kInputMethodOptions) {
+        if (id == option.id) {
+            return option.label;
+        }
+    }
+    return "中文（拼音）";
+}
 
 std::wstring toWide(const std::string &text) {
     if (text.empty()) {
@@ -251,8 +275,15 @@ void TrayIcon::Impl::updateStatus(const std::wstring &status) {
 
 void TrayIcon::Impl::showMenu() {
     HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, kIdChinese, L"切换到中文（拼音）");
-    AppendMenuW(menu, MF_STRING, kIdEnglish, L"切换到英文");
+    HMENU inputMethodMenu = CreatePopupMenu();
+    for (size_t i = 0; i < std::size(kInputMethodOptions); ++i) {
+        const std::wstring label = toWide(kInputMethodOptions[i].label);
+        AppendMenuW(inputMethodMenu, MF_STRING,
+                    kIdInputMethodBase + static_cast<int>(i),
+                    label.c_str());
+    }
+    AppendMenuW(menu, MF_POPUP,
+                reinterpret_cast<UINT_PTR>(inputMethodMenu), L"输入法");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kIdSettings, L"设置...");
     AppendMenuW(menu, MF_STRING, kIdSyncNow, L"立即同步剪贴板");
@@ -311,13 +342,24 @@ LRESULT CALLBACK TrayIcon::Impl::trayProc(HWND hwnd, UINT message,
         self->showSettings();
         return 0;
     case WM_COMMAND:
+        if (LOWORD(wParam) >= kIdInputMethodBase &&
+            LOWORD(wParam) <
+                kIdInputMethodBase +
+                    static_cast<int>(std::size(kInputMethodOptions))) {
+            const auto index =
+                LOWORD(wParam) - kIdInputMethodBase;
+            self->server.switchInputMethod(
+                kInputMethodOptions[index].id);
+            self->updateStatus(toWide(kInputMethodOptions[index].label));
+            return 0;
+        }
         switch (LOWORD(wParam)) {
         case kIdChinese:
-            self->server.switchInputMethod(true);
+            self->server.switchInputMethod("pinyin");
             self->updateStatus(L"已切换到中文（拼音）");
             return 0;
         case kIdEnglish:
-            self->server.switchInputMethod(false);
+            self->server.switchInputMethod("tux-keyboard");
             self->updateStatus(L"已切换到英文");
             return 0;
         case kIdSettings:
@@ -638,15 +680,21 @@ void SettingsWindow::drawUi() {
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 4.0f * scale));
         ImGui::TextUnformatted("默认输入法");
-        if (ImGui::RadioButton("中文（拼音）", !pinyin_.keyboardDefault)) {
-            pinyin_.keyboardDefault = false;
-        }
-        ImGui::SameLine(180.0f * scale);
-        if (ImGui::RadioButton("英文", pinyin_.keyboardDefault)) {
-            pinyin_.keyboardDefault = true;
+        ImGui::SetNextItemWidth(260.0f * scale);
+        const char *currentLabel =
+            inputMethodLabel(pinyin_.defaultInputMethod);
+        if (ImGui::BeginCombo("##default-im", currentLabel)) {
+            for (const auto &option : kInputMethodOptions) {
+                const bool selected =
+                    pinyin_.defaultInputMethod == option.id;
+                if (ImGui::Selectable(option.label, selected)) {
+                    pinyin_.defaultInputMethod = option.id;
+                }
+            }
+            ImGui::EndCombo();
         }
         ImGui::TextDisabled(
-            "安装后如果只能输入英文，请选择“中文（拼音）”，然后应用。");
+            "支持拼音、双拼、五笔、仓颉等；选择后点“应用”。");
         ImGui::Dummy(ImVec2(0, 8.0f * scale));
 
         ImGui::TextUnformatted("每页候选数");
@@ -719,7 +767,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.2.2");
+        ImGui::TextUnformatted("Tux IME 0.3.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

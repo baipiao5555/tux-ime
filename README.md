@@ -21,6 +21,7 @@
 
 - Fcitx5 5.1.22 核心、libime 1.1.17、fcitx5-chinese-addons 5.1.15 的 Windows 构建
 - 拼音引擎、用户词典、模糊拼音配置（Fcitx5 addon 配置）
+- 多输入法：拼音、双拼、五笔、五笔拼音、仓颉、二笔、自然码、冰蟾、电报码、晚风；可在托盘和设置里切换
 - `tuxime-server.exe`：嵌入 Fcitx5，提供命名管道服务
 - `tuxime-x86_64.dll`：独立 TSF CLSID/Profile，支持组合文本、提交、候选选择和回车/退格/ESC
 - 候选窗：GDI+ 分层窗口，跟随光标，数字键选择

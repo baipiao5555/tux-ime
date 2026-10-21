@@ -28,6 +28,21 @@ namespace tuxime {
 
 namespace {
 
+constexpr const char *kInputMethods[] = {
+    "tux-layout", "tux-keyboard", "pinyin", "shuangpin", "wbx",
+    "wbpy",       "cangjie",      "erbi",   "zrm",       "qxm",
+    "db",         "wanfeng",
+};
+
+bool knownInputMethod(const std::string &name) {
+    for (const char *candidate : kInputMethods) {
+        if (name == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
 fcitx::KeySym keySymFromVk(uint32_t vk) {
     switch (vk) {
     case VK_SPACE:
@@ -180,6 +195,8 @@ void Session::createContext() {
     ic_ = std::make_unique<ServerInputContext>(
         *this, server_.instance().inputContextManager());
     ic_->focusIn();
+    server_.instance().setCurrentInputMethod(
+        server_.currentInputMethod());
 }
 
 void Session::destroyContext() {
@@ -463,15 +480,32 @@ void Server::setupEnvironment() {
 }
 
 void Server::registerDefaultGroup() {
+    auto &addonManager = instance_->addonManager();
+    for (const char *addon : {"pinyin", "table", "tuxkeyboard"}) {
+        try {
+            addonManager.addon(addon, true);
+        } catch (const std::exception &e) {
+            FCITX_WARN() << "failed to load addon " << addon << ": "
+                         << e.what();
+        }
+    }
+
     auto &manager = instance_->inputMethodManager();
     manager.load();
-    const bool keyboardDefault = SettingsStore::loadPinyin().keyboardDefault;
+    std::string defaultInputMethod =
+        SettingsStore::loadPinyin().defaultInputMethod;
+    if (!knownInputMethod(defaultInputMethod) ||
+        defaultInputMethod == "tux-layout") {
+        defaultInputMethod = "pinyin";
+    }
+    currentInputMethod_ = defaultInputMethod;
+
     fcitx::InputMethodGroup group("Default");
     group.setDefaultLayout("us");
-    group.inputMethodList().emplace_back("tux-layout");
-    group.inputMethodList().emplace_back("tux-keyboard");
-    group.inputMethodList().emplace_back("pinyin");
-    group.setDefaultInputMethod(keyboardDefault ? "tux-keyboard" : "pinyin");
+    for (const char *name : kInputMethods) {
+        group.inputMethodList().emplace_back(name);
+    }
+    group.setDefaultInputMethod(defaultInputMethod);
     manager.setGroup(std::move(group));
     manager.setCurrentGroup("Default");
     manager.save();
@@ -544,20 +578,27 @@ void Server::applySettings(const PinyinSettings &pinyin,
     if (clipboardSync_) {
         clipboardSync_->updateConfig(sync);
     }
-    runOnFcitxThread([this, keyboardDefault = pinyin.keyboardDefault]() {
+    runOnFcitxThread([this, defaultIM = pinyin.defaultInputMethod]() {
+        currentInputMethod_ = defaultIM;
         instance_->reloadConfig();
         auto &manager = instance_->inputMethodManager();
-        manager.setDefaultInputMethod(keyboardDefault ? "tux-keyboard"
-                                                       : "pinyin");
+        manager.setDefaultInputMethod(defaultIM);
         manager.save();
-        instance_->setCurrentInputMethod(keyboardDefault ? "tux-keyboard"
-                                                          : "pinyin");
+        instance_->setCurrentInputMethod(defaultIM);
     });
 }
 
 void Server::switchInputMethod(bool chinese) {
-    runOnFcitxThread([this, chinese]() {
-        instance_->setCurrentInputMethod(chinese ? "pinyin" : "tux-keyboard");
+    switchInputMethod(chinese ? "pinyin" : "tux-keyboard");
+}
+
+void Server::switchInputMethod(const std::string &inputMethod) {
+    if (!knownInputMethod(inputMethod) || inputMethod == "tux-layout") {
+        return;
+    }
+    runOnFcitxThread([this, inputMethod]() {
+        currentInputMethod_ = inputMethod;
+        instance_->setCurrentInputMethod(inputMethod);
     });
 }
 

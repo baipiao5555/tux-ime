@@ -66,7 +66,7 @@ bool requestKey(HANDLE pipe, uint64_t request, uint32_t vk,
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     const std::wstring name = tuxime::ipc::pipeName();
     if (name.empty()) {
         std::printf("no pipe name\n");
@@ -107,7 +107,8 @@ int main() {
     }
 
     uint64_t request = 10;
-    for (const char *text = "nihao"; *text; ++text) {
+    const char *keys = argc > 1 ? argv[1] : "nihao";
+    for (const char *text = keys; *text; ++text) {
         if (!requestKey(pipe, request++,
                         static_cast<uint32_t>(std::toupper(*text)), 0)) {
             return 1;

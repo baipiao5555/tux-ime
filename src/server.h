@@ -112,6 +112,9 @@ public:
 
     fcitx::Instance &instance() { return *instance_; }
     ClipboardSync &clipboardSync() { return *clipboardSync_; }
+    const std::string &currentInputMethod() const {
+        return currentInputMethod_;
+    }
 
     void schedule(std::function<void()> func);
     void runOnFcitxThread(std::function<void()> func);
@@ -119,6 +122,7 @@ public:
     void applySettings(const PinyinSettings &pinyin,
                        const SyncConfig &sync);
     void switchInputMethod(bool chinese);
+    void switchInputMethod(const std::string &inputMethod);
     void requestExit();
 
 private:
@@ -137,6 +141,7 @@ private:
     uint32_t nextSessionId_ = 1;
     std::unique_ptr<ClipboardSync> clipboardSync_;
     std::unique_ptr<TrayIcon> tray_;
+    std::string currentInputMethod_ = "pinyin";
 };
 
 } // namespace tuxime

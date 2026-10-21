@@ -6,7 +6,7 @@ int main() {
     const auto path = tuxime::SettingsStore::profilePath();
     std::printf("profile: %ls\n", path.c_str());
     const auto settings = tuxime::SettingsStore::loadPinyin();
-    std::printf("keyboardDefault=%d pageSize=%d\n",
-                settings.keyboardDefault ? 1 : 0, settings.pageSize);
+    std::printf("defaultInputMethod=%s pageSize=%d\n",
+                settings.defaultInputMethod.c_str(), settings.pageSize);
     return 0;
 }
