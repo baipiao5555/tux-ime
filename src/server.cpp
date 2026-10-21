@@ -454,11 +454,12 @@ void Server::setupEnvironment() {
 void Server::registerDefaultGroup() {
     auto &manager = instance_->inputMethodManager();
     manager.load();
+    const bool keyboardDefault = SettingsStore::loadPinyin().keyboardDefault;
     fcitx::InputMethodGroup group("Default");
     group.setDefaultLayout("us");
     group.inputMethodList().emplace_back("pinyin");
     group.inputMethodList().emplace_back("tux-keyboard");
-    group.setDefaultInputMethod("pinyin");
+    group.setDefaultInputMethod(keyboardDefault ? "tux-keyboard" : "pinyin");
     manager.setGroup(std::move(group));
     manager.setCurrentGroup("Default");
     manager.save();
@@ -533,8 +534,10 @@ void Server::applySettings(const PinyinSettings &pinyin,
     }
     runOnFcitxThread([this, keyboardDefault = pinyin.keyboardDefault]() {
         instance_->reloadConfig();
-        instance_->inputMethodManager().setDefaultInputMethod(
-            keyboardDefault ? "tux-keyboard" : "pinyin");
+        auto &manager = instance_->inputMethodManager();
+        manager.setDefaultInputMethod(keyboardDefault ? "tux-keyboard"
+                                                       : "pinyin");
+        manager.save();
     });
 }
 
