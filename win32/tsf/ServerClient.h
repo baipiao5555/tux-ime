@@ -19,6 +19,7 @@ struct ServerKeyResult {
     std::wstring preedit;
     std::wstring aux;
     std::wstring commit;
+    std::wstring status;
     std::vector<ServerCandidate> candidates;
     int selected = 0;
 };
@@ -40,6 +41,7 @@ public:
     void setCursor(const RECT &rect);
     void reset();
     ServerKeyResult sendKey(WPARAM vk, LPARAM lParam, bool isUp);
+    ServerKeyResult selectCandidate(int index);
 
 private:
     bool startServer();
@@ -48,6 +50,7 @@ private:
                       const std::vector<uint8_t> &payload);
     bool readMessage(uint32_t &type, uint64_t &request,
                      std::vector<uint8_t> &payload);
+    ServerKeyResult readKeyResult();
 
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
     uint64_t nextRequest_ = 1;

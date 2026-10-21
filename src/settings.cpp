@@ -301,6 +301,15 @@ void SettingsStore::savePinyin(const PinyinSettings &settings) {
                     : settings.defaultInputMethod);
 }
 
+void SettingsStore::ensureAddonDefaults() {
+    const auto confDir = appDataDir().parent_path() / "Fcitx5" / "config" /
+                         "fcitx5" / "conf";
+    const auto fullwidth = confDir / "fullwidth.conf";
+    if (!std::filesystem::exists(fullwidth)) {
+        setIniValue(fullwidth, "Hotkey", "0", "Shift+space");
+    }
+}
+
 bool SettingsStore::setIniValue(const std::filesystem::path &path,
                                 const std::string &section,
                                 const std::string &key,

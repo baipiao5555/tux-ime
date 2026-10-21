@@ -20,6 +20,9 @@ enum class Type : uint32_t {
     KeyResult,
     Reset,
     ShowSettings,
+    ToggleAddon,
+    SwitchInputMethod,
+    SelectCandidate,
 };
 
 enum KeyFlag : uint32_t {
@@ -38,6 +41,7 @@ enum ResultFlag : uint32_t {
     HasCommit = 1U << 1,
     HasAux = 1U << 2,
     HasCandidates = 1U << 3,
+    HasStatus = 1U << 4,
 };
 
 #pragma pack(push, 1)

@@ -37,6 +37,9 @@ constexpr int kIdReload = 1003;
 constexpr int kIdExit = 1004;
 constexpr int kIdChinese = 1005;
 constexpr int kIdEnglish = 1006;
+constexpr int kIdTogglePunctuation = 1007;
+constexpr int kIdToggleFullwidth = 1008;
+constexpr int kIdToggleChttrans = 1009;
 constexpr int kIdInputMethodBase = 1100;
 
 struct InputMethodOption {
@@ -284,6 +287,9 @@ void TrayIcon::Impl::showMenu() {
     }
     AppendMenuW(menu, MF_POPUP,
                 reinterpret_cast<UINT_PTR>(inputMethodMenu), L"输入法");
+    AppendMenuW(menu, MF_STRING, kIdTogglePunctuation, L"切换中文标点");
+    AppendMenuW(menu, MF_STRING, kIdToggleFullwidth, L"切换全角/半角");
+    AppendMenuW(menu, MF_STRING, kIdToggleChttrans, L"切换简体/繁体");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kIdSettings, L"设置...");
     AppendMenuW(menu, MF_STRING, kIdSyncNow, L"立即同步剪贴板");
@@ -364,6 +370,18 @@ LRESULT CALLBACK TrayIcon::Impl::trayProc(HWND hwnd, UINT message,
             return 0;
         case kIdSettings:
             self->showSettings();
+            return 0;
+        case kIdTogglePunctuation:
+            self->server.toggleAddon("punctuation");
+            self->updateStatus(L"已切换中文标点");
+            return 0;
+        case kIdToggleFullwidth:
+            self->server.toggleAddon("fullwidth");
+            self->updateStatus(L"已切换全角/半角");
+            return 0;
+        case kIdToggleChttrans:
+            self->server.toggleAddon("chttrans");
+            self->updateStatus(L"已切换简体/繁体");
             return 0;
         case kIdSyncNow:
             self->server.clipboardSync().trigger();
@@ -725,6 +743,24 @@ void SettingsWindow::drawUi() {
             }
             ImGui::EndTable();
         }
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::TextUnformatted("功能开关");
+        if (ImGui::Button("中文标点")) {
+            tray_.server.toggleAddon("punctuation");
+            status_ = L"已切换中文标点";
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("全角/半角")) {
+            tray_.server.toggleAddon("fullwidth");
+            status_ = L"已切换全角/半角";
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("简体/繁体")) {
+            tray_.server.toggleAddon("chttrans");
+            status_ = L"已切换简体/繁体";
+        }
+        ImGui::TextDisabled(
+            "快捷键：Ctrl+. 标点，Shift+Space 全角，Ctrl+Shift+F 简繁。");
     } else if (page_ == 1) {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f),
                            "剪贴板同步");
@@ -767,7 +803,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.3.0");
+        ImGui::TextUnformatted("Tux IME 0.4.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

@@ -97,6 +97,7 @@ class Tsf : public ITfTextInputProcessorEx,
     std::unique_ptr<CandidateWindow> candidateWindow_;
     std::wstring preedit_;
     std::wstring pendingCommit_;
+    std::wstring status_;
     std::vector<ServerCandidate> candidates_;
     int selectedCandidate_ = 0;
     CComPtr<ITfComposition> composition_;

@@ -33,6 +33,15 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
     server_ = std::make_unique<ServerClient>();
     server_->connect();
     candidateWindow_ = std::make_unique<CandidateWindow>();
+    candidateWindow_->setSelectCallback([this](int index) {
+        if (!server_) {
+            return;
+        }
+        const ServerKeyResult result = server_->selectCandidate(index);
+        if (result.ok) {
+            applyServerResult(result);
+        }
+    });
 
     if (!initThreadMgrEventSink()) {
         goto ActivateExError;

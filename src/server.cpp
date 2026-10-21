@@ -15,10 +15,13 @@
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
 #include <fcitx-utils/log.h>
+#include <fcitx/action.h>
 #include <fcitx/inputcontextmanager.h>
 #include <fcitx/inputmethodgroup.h>
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
+#include <fcitx/statusarea.h>
+#include <fcitx/userinterfacemanager.h>
 
 #include "clipboard_sync.h"
 #include "common/pipe.h"
@@ -41,6 +44,72 @@ bool knownInputMethod(const std::string &name) {
         }
     }
     return false;
+}
+
+std::string inputMethodDisplayName(const std::string &name) {
+    if (name == "pinyin") {
+        return "拼音";
+    }
+    if (name == "shuangpin") {
+        return "双拼";
+    }
+    if (name == "wbx") {
+        return "五笔";
+    }
+    if (name == "wbpy") {
+        return "五笔拼音";
+    }
+    if (name == "cangjie") {
+        return "仓颉";
+    }
+    if (name == "erbi") {
+        return "二笔";
+    }
+    if (name == "zrm") {
+        return "自然码";
+    }
+    if (name == "qxm") {
+        return "冰蟾";
+    }
+    if (name == "db") {
+        return "电报码";
+    }
+    if (name == "wanfeng") {
+        return "晚风";
+    }
+    if (name == "tux-keyboard") {
+        return "英文";
+    }
+    if (name == "tux-layout") {
+        return "键盘";
+    }
+    return name;
+}
+
+std::string statusLabel(const std::string &action,
+                        const std::string &text) {
+    if (action == "punctuation") {
+        if (text.find("Full width") != std::string::npos ||
+            text.find("full width") != std::string::npos) {
+            return "中文标点";
+        }
+        return "英文标点";
+    }
+    if (action == "fullwidth") {
+        if (text.find("Full width") != std::string::npos ||
+            text.find("full width") != std::string::npos) {
+            return "全角";
+        }
+        return "半角";
+    }
+    if (action == "chttrans") {
+        if (text.find("Traditional") != std::string::npos ||
+            text.find("traditional") != std::string::npos) {
+            return "繁体";
+        }
+        return "简体";
+    }
+    return text;
 }
 
 fcitx::KeySym keySymFromVk(uint32_t vk) {
@@ -197,6 +266,67 @@ void Session::createContext() {
     ic_->focusIn();
     server_.instance().setCurrentInputMethod(
         server_.currentInputMethod());
+    addStatusActions();
+}
+
+void Session::addStatusActions() {
+    if (!ic_) {
+        return;
+    }
+    const auto existing = ic_->statusArea().allActions();
+    for (const char *name : {"punctuation", "fullwidth", "chttrans"}) {
+        auto *action =
+            server_.instance().userInterfaceManager().lookupAction(name);
+        if (!action) {
+            continue;
+        }
+        if (std::find(existing.begin(), existing.end(), action) ==
+            existing.end()) {
+            ic_->statusArea().addAction(fcitx::StatusGroup::AfterInputMethod,
+                                        action);
+        }
+    }
+}
+
+void Session::captureStatus() {
+    std::string status;
+    if (ic_) {
+        status = inputMethodDisplayName(
+            server_.instance().currentInputMethod());
+        for (auto *action : ic_->statusArea().allActions()) {
+            if (!action || action->isSeparator()) {
+                continue;
+            }
+            const std::string name = action->name();
+            if (name != "punctuation" && name != "fullwidth" &&
+                name != "chttrans") {
+                continue;
+            }
+            const std::string text = action->shortText(ic_.get());
+            if (text.empty()) {
+                continue;
+            }
+            if (!status.empty()) {
+                status += " · ";
+            }
+            status += statusLabel(name, text);
+        }
+        if (auto candidateList = ic_->inputPanel().candidateList()) {
+            if (auto pageable = candidateList->toPageable()) {
+                const int total = pageable->totalPages();
+                const int current = pageable->currentPage();
+                if (total > 1 && current >= 0) {
+                    if (!status.empty()) {
+                        status += " · ";
+                    }
+                    status += std::to_string(current + 1) + "/" +
+                              std::to_string(total);
+                }
+            }
+        }
+    }
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    status_ = std::move(status);
 }
 
 void Session::destroyContext() {
@@ -213,6 +343,7 @@ void Session::focus(bool focused) {
     }
     if (focused) {
         ic_->focusIn();
+        addStatusActions();
     } else {
         ic_->focusOut();
     }
@@ -227,6 +358,17 @@ void Session::setCursor(const fcitx::Rect &rect) {
 void Session::resetEngine() {
     if (ic_) {
         ic_->reset();
+    }
+}
+
+void Session::activateAction(const std::string &actionName) {
+    if (!ic_) {
+        return;
+    }
+    if (auto *action =
+            server_.instance().userInterfaceManager().lookupAction(
+                actionName)) {
+        action->activate(ic_.get());
     }
 }
 
@@ -269,6 +411,22 @@ void Session::handleKey(const ipc::Key &msg, uint64_t request) {
             fcitx::KeyEvent event(ic_.get(), key, (msg.flags & ipc::KeyUp));
             handled = ic_->keyEvent(event) || event.accepted();
             capturePanel(ic_->inputPanel());
+            captureStatus();
+        }
+    }
+    sendKeyResult(request, handled);
+}
+
+void Session::selectCandidate(int index, uint64_t request) {
+    bool handled = false;
+    if (ic_) {
+        auto candidateList = ic_->inputPanel().candidateList();
+        if (candidateList && index >= 0 &&
+            index < candidateList->size()) {
+            candidateList->candidate(index).select(ic_.get());
+            handled = true;
+            capturePanel(ic_->inputPanel());
+            captureStatus();
         }
     }
     sendKeyResult(request, handled);
@@ -279,6 +437,7 @@ void Session::sendKeyResult(uint64_t request, bool handled) {
     std::string preedit;
     std::string aux;
     std::string commit;
+    std::string status;
     std::vector<Candidate> candidates;
     int selected = 0;
     {
@@ -287,6 +446,7 @@ void Session::sendKeyResult(uint64_t request, bool handled) {
         aux = aux_;
         commit = std::move(commit_);
         commit_.clear();
+        status = status_;
         candidates = candidates_;
         selected = selected_;
     }
@@ -304,6 +464,9 @@ void Session::sendKeyResult(uint64_t request, bool handled) {
     if (!candidates.empty()) {
         flags |= ipc::HasCandidates;
     }
+    if (!status.empty()) {
+        flags |= ipc::HasStatus;
+    }
 
     writer.u32(handled ? 1 : 0);
     writer.u32(flags);
@@ -312,6 +475,7 @@ void Session::sendKeyResult(uint64_t request, bool handled) {
     writer.str(preedit);
     writer.str(aux);
     writer.str(commit);
+    writer.str(status);
     for (const auto &candidate : candidates) {
         writer.str(candidate.label);
         writer.str(candidate.text);
@@ -406,6 +570,29 @@ void Session::dispatch(ipc::Type type, uint64_t request,
     case ipc::Type::ShowSettings:
         server_.showSettings();
         break;
+    case ipc::Type::ToggleAddon: {
+        const std::string action = reader.str();
+        if (reader.ok()) {
+            server_.toggleAddon(action);
+        }
+        break;
+    }
+    case ipc::Type::SwitchInputMethod: {
+        const std::string inputMethod = reader.str();
+        if (reader.ok()) {
+            server_.switchInputMethod(inputMethod);
+        }
+        break;
+    }
+    case ipc::Type::SelectCandidate: {
+        const int index = reader.i32();
+        if (reader.ok()) {
+            server_.runOnFcitxThread([this, index, request]() {
+                selectCandidate(index, request);
+            });
+        }
+        break;
+    }
     default:
         break;
     }
@@ -513,6 +700,7 @@ void Server::registerDefaultGroup() {
 
 bool Server::initialize() {
     setupEnvironment();
+    SettingsStore::ensureAddonDefaults();
     fcitx::Log::setLogRule("*=4");
 
     instance_ = std::make_unique<fcitx::Instance>(0, nullptr);
@@ -599,6 +787,21 @@ void Server::switchInputMethod(const std::string &inputMethod) {
     runOnFcitxThread([this, inputMethod]() {
         currentInputMethod_ = inputMethod;
         instance_->setCurrentInputMethod(inputMethod);
+    });
+}
+
+void Server::toggleAddon(const std::string &action) {
+    runOnFcitxThread([this, action]() {
+        std::vector<std::shared_ptr<Session>> sessions;
+        {
+            std::lock_guard<std::mutex> lock(sessionsMutex_);
+            for (const auto &entry : sessions_) {
+                sessions.push_back(entry.second);
+            }
+        }
+        for (const auto &session : sessions) {
+            session->activateAction(action);
+        }
     });
 }
 

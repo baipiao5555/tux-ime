@@ -203,7 +203,27 @@ ServerKeyResult ServerClient::sendKey(WPARAM vk, LPARAM lParam, bool isUp) {
                       request, writer.take())) {
         return result;
     }
+    return readKeyResult();
+}
 
+ServerKeyResult ServerClient::selectCandidate(int index) {
+    ServerKeyResult result;
+    if (!connect()) {
+        return result;
+    }
+    const uint64_t request = nextRequest_++;
+    tuxime::ipc::Writer writer;
+    writer.i32(index);
+    if (!writeMessage(
+            static_cast<uint32_t>(tuxime::ipc::Type::SelectCandidate),
+            request, writer.take())) {
+        return result;
+    }
+    return readKeyResult();
+}
+
+ServerKeyResult ServerClient::readKeyResult() {
+    ServerKeyResult result;
     uint32_t type = 0;
     uint64_t response = 0;
     std::vector<uint8_t> payload;
@@ -222,6 +242,7 @@ ServerKeyResult ServerClient::sendKey(WPARAM vk, LPARAM lParam, bool isUp) {
     result.preedit = fromUtf8(reader.str());
     result.aux = fromUtf8(reader.str());
     result.commit = fromUtf8(reader.str());
+    result.status = fromUtf8(reader.str());
     for (uint32_t i = 0; i < keyResult.candidateCount; ++i) {
         ServerCandidate candidate;
         candidate.label = fromUtf8(reader.str());

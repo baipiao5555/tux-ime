@@ -25,7 +25,20 @@ bool Tsf::shouldHandleKey(WPARAM wParam, LPARAM) const {
 
     const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     if (ctrl && wParam == VK_SPACE) {
+        return true;
+    }
+    if (ctrl && !alt && wParam == VK_OEM_PERIOD) {
+        return true;
+    }
+    if (ctrl && shift && !alt && wParam == 'F') {
+        return true;
+    }
+    if (ctrl && alt && shift && wParam == 'U') {
+        return true;
+    }
+    if (shift && !ctrl && !alt && wParam == VK_SPACE) {
         return true;
     }
     if (ctrl || alt) {
@@ -33,6 +46,9 @@ bool Tsf::shouldHandleKey(WPARAM wParam, LPARAM) const {
     }
 
     if (wParam >= 'A' && wParam <= 'Z') {
+        return true;
+    }
+    if (wParam == VK_OEM_1) {
         return true;
     }
 
@@ -104,7 +120,8 @@ void Tsf::updateCandidateWindow(const RECT &caret) {
         candidateWindow_->hide();
         return;
     }
-    candidateWindow_->update(candidates_, selectedCandidate_, caret);
+    candidateWindow_->update(candidates_, selectedCandidate_, caret,
+                             status_);
 }
 
 void Tsf::applyServerResult(const ServerKeyResult &result) {
@@ -115,6 +132,7 @@ void Tsf::applyServerResult(const ServerKeyResult &result) {
         pendingCommit_ += result.commit;
     }
     preedit_ = result.preedit;
+    status_ = result.status;
     candidates_ = result.candidates;
     selectedCandidate_ = result.selected;
     pendingCancel_ = false;

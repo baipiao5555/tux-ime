@@ -1,5 +1,6 @@
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <windows.h>
@@ -15,9 +16,13 @@ void printResult(const tuxime::ipc::KeyResult &result,
     const std::string preedit = reader.str();
     const std::string aux = reader.str();
     const std::string commit = reader.str();
+    const std::string status = reader.str();
     std::printf("handled=%u flags=%u selected=%d candidates=%u\n",
                 result.handled, result.flags, result.selected,
                 result.candidateCount);
+    if (!status.empty()) {
+        std::printf("  status: %s\n", status.c_str());
+    }
     if (!preedit.empty()) {
         std::printf("  preedit: %s\n", preedit.c_str());
     }
@@ -95,6 +100,25 @@ int main(int argc, char **argv) {
         std::printf("session=%u version=%u\n", reader.u32(), reader.u32());
     }
 
+    if (argc > 2 && std::strcmp(argv[1], "--toggle") == 0) {
+        tuxime::ipc::Writer writer;
+        writer.str(argv[2]);
+        tuxime::ipc::writeMessage(pipe, tuxime::ipc::Type::ToggleAddon, 2,
+                                  writer.take());
+        CloseHandle(pipe);
+        return 0;
+    }
+
+    if (argc > 2 && std::strcmp(argv[1], "--im") == 0) {
+        tuxime::ipc::Writer writer;
+        writer.str(argv[2]);
+        tuxime::ipc::writeMessage(pipe, tuxime::ipc::Type::SwitchInputMethod,
+                                  2, writer.take());
+        Sleep(200);
+        CloseHandle(pipe);
+        return 0;
+    }
+
     tuxime::ipc::writeMessage(pipe, tuxime::ipc::Type::FocusIn, 2, {});
     {
         tuxime::ipc::Writer writer;
@@ -109,8 +133,15 @@ int main(int argc, char **argv) {
     uint64_t request = 10;
     const char *keys = argc > 1 ? argv[1] : "nihao";
     for (const char *text = keys; *text; ++text) {
-        if (!requestKey(pipe, request++,
-                        static_cast<uint32_t>(std::toupper(*text)), 0)) {
+        uint32_t vk = static_cast<uint32_t>(std::toupper(*text));
+        if (*text == ',') {
+            vk = VK_OEM_COMMA;
+        } else if (*text == '.') {
+            vk = VK_OEM_PERIOD;
+        } else if (*text == ';') {
+            vk = VK_OEM_1;
+        }
+        if (!requestKey(pipe, request++, vk, 0)) {
             return 1;
         }
     }

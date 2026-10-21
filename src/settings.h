@@ -37,6 +37,7 @@ public:
 
     static PinyinSettings loadPinyin();
     static void savePinyin(const PinyinSettings &settings);
+    static void ensureAddonDefaults();
 
 private:
     static bool setIniValue(const std::filesystem::path &path,

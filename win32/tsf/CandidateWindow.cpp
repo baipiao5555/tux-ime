@@ -132,7 +132,8 @@ void CandidateWindow::hide() {
 }
 
 void CandidateWindow::update(const std::vector<ServerCandidate> &candidates,
-                             int selected, const RECT &caret) {
+                             int selected, const RECT &caret,
+                             const std::wstring &status) {
     if (candidates.empty()) {
         hide();
         return;
@@ -140,21 +141,25 @@ void CandidateWindow::update(const std::vector<ServerCandidate> &candidates,
     if (!ensureWindow()) {
         return;
     }
-    render(candidates, selected, caret);
+    render(candidates, selected, caret, status);
 }
 
 void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
-                             int selected, const RECT &caret) {
+                             int selected, const RECT &caret,
+                             const std::wstring &status) {
     const float scale = static_cast<float>(dpi()) / 96.0f;
     const float padding = 8.0f * scale;
     const float itemGap = 14.0f * scale;
     const float innerGap = 6.0f * scale;
-    const float height = 36.0f * scale;
+    const float statusHeight = status.empty() ? 0.0f : 20.0f * scale;
+    const float candidateHeight = 36.0f * scale;
+    const float height = statusHeight + candidateHeight;
     const float radius = 8.0f * scale;
     const float itemRadius = 5.0f * scale;
     const float textSize = 16.0f * scale;
     const float labelSize = 12.0f * scale;
     const float commentSize = 11.0f * scale;
+    const float statusSize = 11.0f * scale;
 
     Gdiplus::Font textFont(L"Microsoft YaHei UI", textSize,
                            Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
@@ -163,6 +168,9 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
     Gdiplus::Font commentFont(L"Microsoft YaHei UI", commentSize,
                               Gdiplus::FontStyleRegular,
                               Gdiplus::UnitPixel);
+    Gdiplus::Font statusFont(L"Microsoft YaHei UI", statusSize,
+                             Gdiplus::FontStyleRegular,
+                             Gdiplus::UnitPixel);
     Gdiplus::StringFormat format;
     format.SetFormatFlags(Gdiplus::StringFormatFlagsMeasureTrailingSpaces);
 
@@ -206,6 +214,13 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
             totalWidth += itemGap;
         }
         layout.push_back(item);
+    }
+    if (!status.empty()) {
+        Gdiplus::RectF statusBounds;
+        measure.MeasureString(status.c_str(), -1, &statusFont,
+                              Gdiplus::PointF(0, 0), &format, &statusBounds);
+        totalWidth = (std::max)(totalWidth,
+                                padding * 2.0f + statusBounds.Width);
     }
     ReleaseDC(nullptr, screen);
 
@@ -260,18 +275,31 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                             1.0f * scale);
         graphics.DrawPath(&border, &backgroundPath);
 
+        if (!status.empty()) {
+            Gdiplus::SolidBrush statusBrush(
+                Gdiplus::Color(255, 110, 118, 130));
+            graphics.DrawString(status.c_str(), -1, &statusFont,
+                                Gdiplus::PointF(padding, 3.0f * scale),
+                                &statusBrush);
+        }
+
         float itemX = padding;
+        hitRanges_.clear();
+        statusHeight_ = statusHeight;
+        rowHeight_ = candidateHeight;
         for (size_t i = 0; i < candidates.size(); ++i) {
             const auto &item = layout[i];
             const bool isSelected = static_cast<int>(i) == selected;
             const float itemLeft = itemX - innerGap * 0.5f;
             const float itemWidth = item.width + innerGap;
+            hitRanges_.emplace_back(itemLeft, itemLeft + itemWidth);
             if (isSelected) {
                 Gdiplus::GraphicsPath selectedPath;
                 addRoundedRect(
                     selectedPath,
-                    Gdiplus::RectF(itemLeft, 4.0f * scale, itemWidth,
-                                   height - 8.0f * scale),
+                    Gdiplus::RectF(itemLeft, statusHeight + 4.0f * scale,
+                                   itemWidth,
+                                   candidateHeight - 8.0f * scale),
                     itemRadius);
                 Gdiplus::SolidBrush selectedBrush(
                     Gdiplus::Color(255, 214, 232, 255));
@@ -286,10 +314,12 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
             Gdiplus::SolidBrush commentBrush(
                 Gdiplus::Color(255, 120, 125, 135));
 
-            const float textY =
-                (height - textSize) / 2.0f - 1.0f * scale;
-            const float labelY =
-                (height - labelSize) / 2.0f - 0.5f * scale;
+            const float textY = statusHeight +
+                                (candidateHeight - textSize) / 2.0f -
+                                1.0f * scale;
+            const float labelY = statusHeight +
+                                 (candidateHeight - labelSize) / 2.0f -
+                                 0.5f * scale;
             graphics.DrawString(item.label.c_str(), -1, &labelFont,
                                 Gdiplus::PointF(itemX, labelY), &labelBrush);
             const float textX = itemX + item.labelWidth + innerGap;
@@ -297,8 +327,9 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                 Gdiplus::PointF(textX, textY), &textBrush);
             if (item.commentWidth > 0.0f) {
                 const float commentX = textX + item.textWidth + innerGap;
-                const float commentY =
-                    (height - commentSize) / 2.0f - 1.0f * scale;
+                const float commentY = statusHeight +
+                                       (candidateHeight - commentSize) / 2.0f -
+                                       1.0f * scale;
                 graphics.DrawString(candidates[i].comment.c_str(), -1,
                                     &commentFont,
                                     Gdiplus::PointF(commentX, commentY),
@@ -368,9 +399,30 @@ LRESULT CALLBACK CandidateWindow::windowProc(HWND hwnd, UINT message,
                                               LPARAM lParam) {
     switch (message) {
     case WM_NCHITTEST:
-        return HTTRANSPARENT;
+        return HTCLIENT;
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
+    case WM_LBUTTONUP: {
+        auto *self = reinterpret_cast<CandidateWindow *>(
+            GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (self && self->selectCallback_) {
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd, &point);
+            const float y = static_cast<float>(point.y);
+            if (y >= self->statusHeight_ &&
+                y <= self->statusHeight_ + self->rowHeight_) {
+                for (size_t i = 0; i < self->hitRanges_.size(); ++i) {
+                    if (point.x >= self->hitRanges_[i].first &&
+                        point.x <= self->hitRanges_[i].second) {
+                        self->selectCallback_(static_cast<int>(i));
+                        break;
+                    }
+                }
+            }
+        }
+        return 0;
+    }
     case WM_ERASEBKGND:
         return 1;
     default:

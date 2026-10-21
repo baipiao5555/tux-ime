@@ -72,6 +72,10 @@ public:
     void setCursor(const fcitx::Rect &rect);
     void resetEngine();
     void handleKey(const ipc::Key &key, uint64_t request);
+    void selectCandidate(int index, uint64_t request);
+    void activateAction(const std::string &action);
+    void addStatusActions();
+    void captureStatus();
     void appendCommit(const std::string &text);
     void capturePanel(const fcitx::InputPanel &panel);
 
@@ -97,6 +101,7 @@ private:
     std::string preedit_;
     std::string aux_;
     std::string commit_;
+    std::string status_;
     std::vector<Candidate> candidates_;
     int selected_ = 0;
 };
@@ -123,6 +128,7 @@ public:
                        const SyncConfig &sync);
     void switchInputMethod(bool chinese);
     void switchInputMethod(const std::string &inputMethod);
+    void toggleAddon(const std::string &action);
     void requestExit();
 
 private:
