@@ -140,6 +140,10 @@ int main(int argc, char **argv) {
             vk = VK_OEM_PERIOD;
         } else if (*text == ';') {
             vk = VK_OEM_1;
+        } else if (*text == '=') {
+            vk = VK_OEM_PLUS;
+        } else if (*text == '-') {
+            vk = VK_OEM_MINUS;
         }
         if (!requestKey(pipe, request++, vk, 0)) {
             return 1;

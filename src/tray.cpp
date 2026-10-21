@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -178,6 +179,10 @@ private:
     char url_[2048] = {};
     char username_[256] = {};
     char password_[256] = {};
+    char phraseCode_[64] = {};
+    char phraseText_[512] = {};
+    std::vector<CustomPhrase> phrases_;
+    int phraseSelected_ = -1;
     int page_ = 0;
     std::wstring status_;
 };
@@ -586,6 +591,7 @@ void SettingsWindow::loadValues() {
     copyText(url_, sizeof(url_), sync_.serverUrl);
     copyText(username_, sizeof(username_), sync_.username);
     copyText(password_, sizeof(password_), sync_.password);
+    phrases_ = SettingsStore::loadPhrases();
     status_ = L"就绪";
 }
 
@@ -675,8 +681,8 @@ void SettingsWindow::drawUi() {
                           ImVec4(0.93f, 0.95f, 0.98f, 1.0f));
     ImGui::BeginChild("##nav", ImVec2(180.0f * scale, 0), false);
     ImGui::Dummy(ImVec2(0, 10.0f * scale));
-    const char *tabs[] = {"输入法", "剪贴板同步", "关于"};
-    for (int i = 0; i < 3; ++i) {
+    const char *tabs[] = {"输入法", "剪贴板", "短语", "关于"};
+    for (int i = 0; i < 4; ++i) {
         const bool selected = page_ == i;
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Header,
@@ -858,11 +864,80 @@ void SettingsWindow::drawUi() {
         }
         ImGui::SameLine();
         ImGui::TextDisabled("建议使用 HTTPS");
+    } else if (page_ == 2) {
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f),
+                           "自定义短语");
+        ImGui::Separator();
+        ImGui::TextDisabled("拼音编码 + 输出文本，例如 nihao → 你好呀。");
+        ImGui::BeginChild("##phrase-list", ImVec2(0, 210.0f * scale), true);
+        for (size_t i = 0; i < phrases_.size(); ++i) {
+            std::string display =
+                phrases_[i].code + "   " + phrases_[i].text;
+            if (display.size() > 100) {
+                display.resize(100);
+                display += "...";
+            }
+            display += "##phrase";
+            display += std::to_string(i);
+            if (ImGui::Selectable(display.c_str(),
+                                  phraseSelected_ == static_cast<int>(i))) {
+                phraseSelected_ = static_cast<int>(i);
+                copyText(phraseCode_, sizeof(phraseCode_),
+                         phrases_[i].code);
+                copyText(phraseText_, sizeof(phraseText_),
+                         phrases_[i].text);
+            }
+        }
+        ImGui::EndChild();
+        ImGui::SetNextItemWidth(180.0f * scale);
+        ImGui::InputTextWithHint("##phrase-code", "编码",
+                                 phraseCode_, sizeof(phraseCode_));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(320.0f * scale);
+        ImGui::InputTextWithHint("##phrase-text", "短语",
+                                 phraseText_, sizeof(phraseText_));
+        if (ImGui::Button("添加/更新")) {
+            std::string code = phraseCode_;
+            std::string text = phraseText_;
+            std::transform(code.begin(), code.end(), code.begin(),
+                           [](unsigned char c) {
+                               return static_cast<char>(std::tolower(c));
+                           });
+            if (code.empty() || text.empty()) {
+                status_ = L"编码和短语不能为空";
+            } else {
+                if (phraseSelected_ >= 0 &&
+                    phraseSelected_ < static_cast<int>(phrases_.size())) {
+                    phrases_[phraseSelected_].code = code;
+                    phrases_[phraseSelected_].text = text;
+                } else {
+                    phrases_.push_back({code, text});
+                    phraseSelected_ =
+                        static_cast<int>(phrases_.size()) - 1;
+                }
+                SettingsStore::savePhrases(phrases_);
+                tray_.server.applySettings(pinyin_, sync_);
+                status_ = L"短语已保存并生效";
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("删除选中")) {
+            if (phraseSelected_ >= 0 &&
+                phraseSelected_ < static_cast<int>(phrases_.size())) {
+                phrases_.erase(phrases_.begin() + phraseSelected_);
+                phraseSelected_ = -1;
+                phraseCode_[0] = '\0';
+                phraseText_[0] = '\0';
+                SettingsStore::savePhrases(phrases_);
+                tray_.server.applySettings(pinyin_, sync_);
+                status_ = L"短语已删除";
+            }
+        }
     } else {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.5.0");
+        ImGui::TextUnformatted("Tux IME 0.6.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

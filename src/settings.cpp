@@ -332,6 +332,72 @@ void SettingsStore::ensureAddonDefaults() {
     }
 }
 
+std::filesystem::path SettingsStore::customPhrasePath() {
+    return appDataDir().parent_path() / "fcitx5" / "pinyin" /
+           "customphrase";
+}
+
+std::vector<CustomPhrase> SettingsStore::loadPhrases() {
+    std::vector<CustomPhrase> phrases;
+    std::ifstream in(customPhrasePath(), std::ios::binary);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const auto value = trim(line);
+        if (value.empty() || value[0] == '#') {
+            continue;
+        }
+        const auto comma = value.find(',');
+        const auto equals = value.find('=');
+        if (comma == std::string::npos || equals == std::string::npos ||
+            comma > equals) {
+            continue;
+        }
+        CustomPhrase phrase;
+        phrase.code = trim(value.substr(0, comma));
+        phrase.text = trim(value.substr(equals + 1));
+        if (phrase.code.empty() || phrase.text.empty()) {
+            continue;
+        }
+        if (phrase.text.size() >= 2 && phrase.text.front() == '"' &&
+            phrase.text.back() == '"') {
+            phrase.text = phrase.text.substr(1, phrase.text.size() - 2);
+        }
+        phrases.push_back(std::move(phrase));
+    }
+    return phrases;
+}
+
+void SettingsStore::savePhrases(const std::vector<CustomPhrase> &phrases) {
+    const auto path = customPhrasePath();
+    std::filesystem::create_directories(path.parent_path());
+    const auto temp = path.wstring() + L".tmp";
+    {
+        std::ofstream out(std::filesystem::path(temp),
+                          std::ios::binary | std::ios::trunc);
+        for (const auto &phrase : phrases) {
+            std::string text = phrase.text;
+            const bool quote = text.find_first_of("\n\r\"\\") !=
+                               std::string::npos;
+            if (quote) {
+                std::string escaped;
+                for (char c : text) {
+                    if (c == '"' || c == '\\') {
+                        escaped.push_back('\\');
+                    }
+                    escaped.push_back(c);
+                }
+                text = "\"" + escaped + "\"";
+            }
+            out << phrase.code << ",1=" << text << '\n';
+        }
+    }
+    MoveFileExW(temp.c_str(), path.wstring().c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
 bool SettingsStore::setIniValue(const std::filesystem::path &path,
                                 const std::string &section,
                                 const std::string &key,

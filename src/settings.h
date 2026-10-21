@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace tuxime {
 
@@ -31,6 +32,11 @@ struct PinyinSettings {
     bool pinyinInPreedit = false;
 };
 
+struct CustomPhrase {
+    std::string code;
+    std::string text;
+};
+
 class SettingsStore {
 public:
     static std::filesystem::path appDataDir();
@@ -44,6 +50,10 @@ public:
     static PinyinSettings loadPinyin();
     static void savePinyin(const PinyinSettings &settings);
     static void ensureAddonDefaults();
+
+    static std::filesystem::path customPhrasePath();
+    static std::vector<CustomPhrase> loadPhrases();
+    static void savePhrases(const std::vector<CustomPhrase> &phrases);
 
 private:
     static bool setIniValue(const std::filesystem::path &path,
