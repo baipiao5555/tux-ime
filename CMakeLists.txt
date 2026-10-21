@@ -54,3 +54,7 @@ install(TARGETS tux-ime-test DESTINATION "${CMAKE_INSTALL_BINDIR}")
 add_executable(tux-client-test tools/tux-client-test.cpp)
 target_include_directories(tux-client-test PRIVATE "${CMAKE_SOURCE_DIR}")
 install(TARGETS tux-client-test DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+add_executable(sync-test tools/sync-test.cpp src/clipboard_sync.cpp)
+target_include_directories(sync-test PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(sync-test winhttp bcrypt ws2_32 crypt32)

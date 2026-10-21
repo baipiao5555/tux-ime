@@ -16,6 +16,7 @@
 #include <fcitx/instance.h>
 
 #include "common/ipc.h"
+#include "settings.h"
 
 namespace fcitx {
 class EventDispatcher;
@@ -26,6 +27,8 @@ class InputPanel;
 
 namespace tuxime {
 
+class ClipboardSync;
+class TrayIcon;
 class Server;
 class Session;
 
@@ -104,26 +107,35 @@ public:
     ~Server();
 
     bool initialize();
-    int run();
+    int run(bool showSettings = false);
+    void showSettings();
 
     fcitx::Instance &instance() { return *instance_; }
+    ClipboardSync &clipboardSync() { return *clipboardSync_; }
 
     void schedule(std::function<void()> func);
     void runOnFcitxThread(std::function<void()> func);
     void removeSession(uint32_t id);
+    void applySettings(const PinyinSettings &pinyin,
+                       const SyncConfig &sync);
+    void requestExit();
 
 private:
     void acceptLoop();
+    void stopAccepting();
     void setupEnvironment();
     void registerDefaultGroup();
 
     std::unique_ptr<fcitx::Instance> instance_;
     std::unique_ptr<fcitx::EventDispatcher> dispatcher_;
     std::atomic<bool> running_{true};
+    std::atomic<HANDLE> listenPipe_{nullptr};
     std::thread pipeThread_;
     std::mutex sessionsMutex_;
     std::unordered_map<uint32_t, std::shared_ptr<Session>> sessions_;
     uint32_t nextSessionId_ = 1;
+    std::unique_ptr<ClipboardSync> clipboardSync_;
+    std::unique_ptr<TrayIcon> tray_;
 };
 
 } // namespace tuxime

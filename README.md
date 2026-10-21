@@ -25,24 +25,36 @@
 - `tuxime-x86_64.dll`：独立 TSF CLSID/Profile，支持组合文本、提交、候选选择和回车/退格/ESC
 - 候选窗：GDI+ 分层窗口，跟随光标，数字键选择
 - 服务端与 TSF 前端通过按用户 SID 隔离的命名管道通信
+- 托盘菜单和内置设置窗口：默认输入法、每页候选数、模糊拼音、剪贴板同步
+- 剪贴板文本同步：SyncClipboard HTTP 协议、DPAPI 保存密码、URL 主机和解析地址校验（拒绝本机/环回/私有/保留地址，不跟随重定向）
+- NSIS 安装器、卸载器和开始菜单“Tux IME 设置”快捷方式
 
 尚未完成：
 
-- 内置设置窗口（当前通过 Fcitx5 配置文件和托盘/后续版本）
-- 剪贴板同步（SyncClipboard 协议）
-- 安装器、自动更新、32 位 TSF
-- 主题、候选窗鼠标选择、分页按钮
+- 剪贴板图片/文件同步、自动更新
+- 32 位 TSF
+- 主题编辑、候选窗鼠标选择、分页按钮
+- 双拼/五笔的内置图形化配置
 
 ## 技术路线
 
 - 输入引擎：Fcitx5 + libime + fcitx5-chinese-addons
 - Windows 接入：TSF text service
 - 进程模型：TSF DLL 通过命名管道连接常驻的 `tuxime-server.exe`，引擎和词典只在服务端加载
-- UI：GDI+ 候选窗；设置作为服务端内置窗口
+- UI：GDI+ 候选窗；托盘和设置窗口在服务端进程内
 
 ## 构建
 
 依赖：Windows 10/11 x64、Visual Studio 2022 Build Tools（C++ 桌面开发 + ATL）、CMake、Ninja、MSYS2 clang64（clang、CMake、Ninja、pkgconf、gettext、boost、libuv、zstd）。
+
+推荐直接运行构建脚本（会自动应用补丁、构建全部依赖、组装 `dist/TuxIME-final`）：
+
+```powershell
+git submodule update --init --recursive
+.\scripts\build-all.ps1
+```
+
+脚本里的 TSF 步骤需要在 Visual Studio 开发者命令行中运行（需要 `cl.exe`）。也可以按下面的手动步骤构建：
 
 ```powershell
 # 1. 初始化子模块（含 libime 的 kenlm 子模块）
@@ -83,13 +95,20 @@ TuxIME/
 
 ## 安装/测试
 
-1. 把上面的目录放到一个测试位置。
-2. 以管理员身份运行：
-   `regsvr32 /s <路径>\bin\tuxime-x86_64.dll`
-3. 在 Windows 设置里把 “Tux IME” 加入中文输入法，或临时用
-   `Set-WinDefaultInputMethodOverride` 指向
-   `0804:{8D7031FD-4D2D-4CCE-BB41-05F54D7AC612}{76AE52E2-7F68-4A6D-81D0-A48D4AC73E36}`。
-4. 卸载：`regsvr32 /u /s <路径>\bin\tuxime-x86_64.dll`。
+推荐使用 Release 里的 `TuxIME-Setup-*.exe`，安装后：
+
+1. 开始菜单打开 “Tux IME 设置”，在“输入法”里选择默认输入法和模糊拼音。
+2. 在 Windows 设置 → 时间和语言 → 语言和区域 → 中文 → 键盘 中添加 “Tux IME”。
+3. 托盘图标右键可打开设置、立即同步剪贴板或退出服务。
+4. 卸载使用“应用和功能”里的 Tux IME。
+
+安装器不会自动修改默认输入法；需要手动切换。
+
+手工测试（不运行安装器）时，把 `dist/TuxIME-final` 放到测试目录，以管理员身份运行
+`regsvr32 /s <路径>\bin\tuxime-x86_64.dll`，然后用
+`Set-WinDefaultInputMethodOverride` 指向
+`0804:{8D7031FD-4D2D-4CCE-BB41-05F54D7AC612}{76AE52E2-7F68-4A6D-81D0-A48D4AC73E36}`。
+卸载：`regsvr32 /u /s <路径>\bin\tuxime-x86_64.dll`。
 
 日常使用前请先备份当前输入法配置；开发版本可能崩溃。
 

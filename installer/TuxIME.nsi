@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APP_NAME "Tux IME"
-!define APP_VERSION "0.1.0"
+!define APP_VERSION "0.2.1"
 !define APP_PUBLISHER "Tux IME Project"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TuxIME"
 !define DIST_DIR "..\dist\TuxIME-final"
@@ -45,6 +45,7 @@ Function .onInit
 FunctionEnd
 
 Section "Tux IME" SecMain
+    SetShellVarContext all
     SetOutPath "$INSTDIR"
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
     File /r "${DIST_DIR}\*.*"
@@ -54,6 +55,10 @@ Section "Tux IME" SecMain
     ${EndIf}
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
+    CreateDirectory "$SMPROGRAMS\Tux IME"
+    CreateShortCut "$SMPROGRAMS\Tux IME\Tux IME 设置.lnk" \
+        "$INSTDIR\bin\tuxime-server.exe" "--settings" \
+        "$INSTDIR\bin\penguin.ico" 0
     WriteRegStr HKLM "Software\TuxIME" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "${APP_KEY}" "DisplayName" "${APP_NAME}"
     WriteRegStr HKLM "${APP_KEY}" "DisplayVersion" "${APP_VERSION}"
@@ -69,6 +74,7 @@ Section "Tux IME" SecMain
 SectionEnd
 
 Section "Uninstall"
+    SetShellVarContext all
     SetRegView 64
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
     ${If} ${RunningX64}
@@ -77,5 +83,7 @@ Section "Uninstall"
 
     DeleteRegKey HKLM "${APP_KEY}"
     DeleteRegKey HKLM "Software\TuxIME"
+    Delete "$SMPROGRAMS\Tux IME\Tux IME 设置.lnk"
+    RMDir "$SMPROGRAMS\Tux IME"
     RMDir /r "$INSTDIR"
 SectionEnd

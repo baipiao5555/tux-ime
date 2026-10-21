@@ -19,6 +19,7 @@ enum class Type : uint32_t {
     Key,
     KeyResult,
     Reset,
+    ShowSettings,
 };
 
 enum KeyFlag : uint32_t {

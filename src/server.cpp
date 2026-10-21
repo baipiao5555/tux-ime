@@ -20,7 +20,9 @@
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
 
+#include "clipboard_sync.h"
 #include "common/pipe.h"
+#include "tray.h"
 
 namespace tuxime {
 
@@ -384,6 +386,9 @@ void Session::dispatch(ipc::Type type, uint64_t request,
     case ipc::Type::Reset:
         server_.runOnFcitxThread([this]() { resetEngine(); });
         break;
+    case ipc::Type::ShowSettings:
+        server_.showSettings();
+        break;
     default:
         break;
     }
@@ -417,9 +422,16 @@ Server::Server() = default;
 
 Server::~Server() {
     running_ = false;
+    if (clipboardSync_) {
+        clipboardSync_->stop();
+    }
+    if (tray_) {
+        tray_->stop();
+    }
     if (dispatcher_) {
         dispatcher_->schedule(nullptr);
     }
+    stopAccepting();
     if (pipeThread_.joinable()) {
         pipeThread_.join();
     }
@@ -449,6 +461,7 @@ void Server::registerDefaultGroup() {
     group.setDefaultInputMethod("pinyin");
     manager.setGroup(std::move(group));
     manager.setCurrentGroup("Default");
+    manager.save();
 }
 
 bool Server::initialize() {
@@ -466,11 +479,63 @@ bool Server::initialize() {
     return instance_->initialized();
 }
 
-int Server::run() {
+int Server::run(bool showSettingsRequested) {
+    clipboardSync_ = std::make_unique<ClipboardSync>();
+    tray_ = std::make_unique<TrayIcon>(*this);
+    tray_->start();
+    if (showSettingsRequested) {
+        tray_->showSettings();
+    }
+    clipboardSync_->start(SettingsStore::loadSync(),
+                          [this](const std::wstring &status) {
+                              if (tray_) {
+                                  tray_->setStatus(status);
+                              }
+                          });
+
     pipeThread_ = std::thread([this]() { acceptLoop(); });
     instance_->eventLoop().exec();
     running_ = false;
+    stopAccepting();
+    if (clipboardSync_) {
+        clipboardSync_->stop();
+    }
+    if (tray_) {
+        tray_->stop();
+    }
     return 0;
+}
+
+void Server::stopAccepting() {
+    HANDLE pipe = listenPipe_.exchange(nullptr);
+    if (pipe) {
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+    }
+}
+
+void Server::showSettings() {
+    if (tray_) {
+        tray_->showSettings();
+    }
+}
+
+void Server::requestExit() {
+    running_ = false;
+    stopAccepting();
+    schedule([this]() { instance_->exit(); });
+}
+
+void Server::applySettings(const PinyinSettings &pinyin,
+                           const SyncConfig &sync) {
+    if (clipboardSync_) {
+        clipboardSync_->updateConfig(sync);
+    }
+    runOnFcitxThread([this, keyboardDefault = pinyin.keyboardDefault]() {
+        instance_->reloadConfig();
+        instance_->inputMethodManager().setDefaultInputMethod(
+            keyboardDefault ? "tux-keyboard" : "pinyin");
+    });
 }
 
 void Server::schedule(std::function<void()> func) {
@@ -559,11 +624,13 @@ void Server::acceptLoop() {
             continue;
         }
         first = false;
+        listenPipe_ = pipe;
 
         const BOOL connected =
             ConnectNamedPipe(pipe, nullptr)
                 ? TRUE
                 : GetLastError() == ERROR_PIPE_CONNECTED;
+        listenPipe_ = nullptr;
         if (!connected) {
             CloseHandle(pipe);
             continue;
