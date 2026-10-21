@@ -18,6 +18,7 @@
 #include <imgui_impl_win32.h>
 
 #include "clipboard_sync.h"
+#include "common/appearance.h"
 #include "server.h"
 #include "settings.h"
 
@@ -183,6 +184,7 @@ private:
     char phraseText_[512] = {};
     std::vector<CustomPhrase> phrases_;
     int phraseSelected_ = -1;
+    tuxime::Appearance appearance_;
     int page_ = 0;
     std::wstring status_;
 };
@@ -592,6 +594,7 @@ void SettingsWindow::loadValues() {
     copyText(username_, sizeof(username_), sync_.username);
     copyText(password_, sizeof(password_), sync_.password);
     phrases_ = SettingsStore::loadPhrases();
+    appearance_ = tuxime::loadAppearance();
     status_ = L"就绪";
 }
 
@@ -681,8 +684,8 @@ void SettingsWindow::drawUi() {
                           ImVec4(0.93f, 0.95f, 0.98f, 1.0f));
     ImGui::BeginChild("##nav", ImVec2(180.0f * scale, 0), false);
     ImGui::Dummy(ImVec2(0, 10.0f * scale));
-    const char *tabs[] = {"输入法", "剪贴板", "短语", "关于"};
-    for (int i = 0; i < 4; ++i) {
+    const char *tabs[] = {"输入法", "剪贴板", "短语", "外观", "关于"};
+    for (int i = 0; i < 5; ++i) {
         const bool selected = page_ == i;
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Header,
@@ -933,11 +936,26 @@ void SettingsWindow::drawUi() {
                 status_ = L"短语已删除";
             }
         }
+    } else if (page_ == 3) {
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "外观");
+        ImGui::Separator();
+        ImGui::TextDisabled("候选窗设置；保存后下一次按键生效。");
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::TextUnformatted("候选窗字号");
+        ImGui::SetNextItemWidth(240.0f * scale);
+        ImGui::SliderInt("##font-size", &appearance_.fontSize, 12, 24);
+        ImGui::Checkbox("深色候选窗", &appearance_.dark);
+        ImGui::Checkbox("显示输入法/标点/简繁状态", &appearance_.showStatus);
+        ImGui::Dummy(ImVec2(0, 10.0f * scale));
+        if (ImGui::Button("保存外观")) {
+            tuxime::saveAppearance(appearance_);
+            status_ = L"外观已保存";
+        }
     } else {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.6.0");
+        ImGui::TextUnformatted("Tux IME 0.7.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

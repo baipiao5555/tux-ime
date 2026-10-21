@@ -8,6 +8,8 @@
 
 #include <gdiplus.h>
 
+#include "common/appearance.h"
+
 #pragma comment(lib, "gdiplus.lib")
 
 namespace fcitx {
@@ -148,18 +150,21 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                              int selected, const RECT &caret,
                              const std::wstring &status) {
     const float scale = static_cast<float>(dpi()) / 96.0f;
+    const tuxime::Appearance appearance = tuxime::loadAppearance();
     const float padding = 8.0f * scale;
     const float itemGap = 14.0f * scale;
     const float innerGap = 6.0f * scale;
-    const float statusHeight = status.empty() ? 0.0f : 20.0f * scale;
-    const float candidateHeight = 36.0f * scale;
+    const float statusHeight =
+        (appearance.showStatus && !status.empty()) ? 20.0f * scale : 0.0f;
+    const float candidateHeight =
+        (std::max)(36.0f, appearance.fontSize * 2.2f) * scale;
     const float height = statusHeight + candidateHeight;
     const float radius = 8.0f * scale;
     const float itemRadius = 5.0f * scale;
-    const float textSize = 16.0f * scale;
-    const float labelSize = 12.0f * scale;
-    const float commentSize = 11.0f * scale;
-    const float statusSize = 11.0f * scale;
+    const float textSize = appearance.fontSize * scale;
+    const float labelSize = appearance.fontSize * 0.75f * scale;
+    const float commentSize = appearance.fontSize * 0.68f * scale;
+    const float statusSize = appearance.fontSize * 0.68f * scale;
 
     Gdiplus::Font textFont(L"Microsoft YaHei UI", textSize,
                            Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
@@ -269,15 +274,19 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                       static_cast<float>(windowHeight)),
                        radius);
         Gdiplus::SolidBrush background(
-            Gdiplus::Color(246, 250, 250, 250));
+            appearance.dark ? Gdiplus::Color(246, 30, 32, 36)
+                            : Gdiplus::Color(246, 250, 250, 250));
         graphics.FillPath(&background, &backgroundPath);
-        Gdiplus::Pen border(Gdiplus::Color(220, 190, 195, 205),
-                            1.0f * scale);
+        Gdiplus::Pen border(
+            appearance.dark ? Gdiplus::Color(220, 70, 74, 82)
+                            : Gdiplus::Color(220, 190, 195, 205),
+            1.0f * scale);
         graphics.DrawPath(&border, &backgroundPath);
 
-        if (!status.empty()) {
+        if (!status.empty() && appearance.showStatus) {
             Gdiplus::SolidBrush statusBrush(
-                Gdiplus::Color(255, 110, 118, 130));
+                appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
+                                : Gdiplus::Color(255, 110, 118, 130));
             graphics.DrawString(status.c_str(), -1, &statusFont,
                                 Gdiplus::PointF(padding, 3.0f * scale),
                                 &statusBrush);
@@ -302,17 +311,23 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                    candidateHeight - 8.0f * scale),
                     itemRadius);
                 Gdiplus::SolidBrush selectedBrush(
-                    Gdiplus::Color(255, 214, 232, 255));
+                    appearance.dark ? Gdiplus::Color(255, 48, 78, 130)
+                                    : Gdiplus::Color(255, 214, 232, 255));
                 graphics.FillPath(&selectedBrush, &selectedPath);
             }
 
             Gdiplus::SolidBrush labelBrush(
-                isSelected ? Gdiplus::Color(255, 70, 110, 160)
-                           : Gdiplus::Color(255, 130, 135, 145));
+                isSelected
+                    ? (appearance.dark ? Gdiplus::Color(255, 140, 185, 255)
+                                       : Gdiplus::Color(255, 70, 110, 160))
+                    : (appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
+                                       : Gdiplus::Color(255, 130, 135, 145)));
             Gdiplus::SolidBrush textBrush(
-                Gdiplus::Color(255, 28, 30, 34));
+                appearance.dark ? Gdiplus::Color(255, 235, 236, 238)
+                                : Gdiplus::Color(255, 28, 30, 34));
             Gdiplus::SolidBrush commentBrush(
-                Gdiplus::Color(255, 120, 125, 135));
+                appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
+                                : Gdiplus::Color(255, 120, 125, 135));
 
             const float textY = statusHeight +
                                 (candidateHeight - textSize) / 2.0f -
