@@ -2,17 +2,17 @@
 #include <format>
 
 namespace fcitx {
-// {FC3869BA-51E3-4078-8EE2-5FE49493A1F4}
-const GUID FCITX_CLSID = {0xfc3869ba,
-                          0x51e3,
-                          0x4078,
-                          {0x8e, 0xe2, 0x5f, 0xe4, 0x94, 0x93, 0xa1, 0xf4}};
+// {8D7031FD-4D2D-4CCE-BB41-05F54D7AC612}
+const GUID FCITX_CLSID = {0x8d7031fd,
+                          0x4d2d,
+                          0x4cce,
+                          {0xbb, 0x41, 0x05, 0xf5, 0x4d, 0x7a, 0xc6, 0x12}};
 
-// {9A92B895-29B9-4F19-9627-9F626C9490F2}
-const GUID PROFILE_GUID{0x9a92b895,
-                        0x29b9,
-                        0x4f19,
-                        {0x96, 0x27, 0x9f, 0x62, 0x6c, 0x94, 0x90, 0xf2}};
+// {76AE52E2-7F68-4A6D-81D0-A48D4AC73E36}
+const GUID PROFILE_GUID{0x76ae52e2,
+                        0x7f68,
+                        0x4a6d,
+                        {0x81, 0xd0, 0xa4, 0x8d, 0x4a, 0xc7, 0x3e, 0x36}};
 
 std::string guidToString(REFGUID guid) {
     const auto *p = reinterpret_cast<const unsigned char *>(&guid);

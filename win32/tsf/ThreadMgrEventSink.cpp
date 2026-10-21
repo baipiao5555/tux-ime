@@ -32,11 +32,16 @@ STDMETHODIMP Tsf::OnUninitDocumentMgr(ITfDocumentMgr *pDocMgr) { return S_OK; }
 
 STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
+    clearCompositionState();
     initTextEditSink(pDocMgrFocus);
     return S_OK;
 }
 
 STDMETHODIMP Tsf::OnPushContext(ITfContext *pContext) { return S_OK; }
 
-STDMETHODIMP Tsf::OnPopContext(ITfContext *pContext) { return S_OK; }
+STDMETHODIMP Tsf::OnPopContext(ITfContext *pContext) {
+    if (textEditSinkContext_ && pContext == textEditSinkContext_)
+        clearCompositionState();
+    return S_OK;
+}
 } // namespace fcitx

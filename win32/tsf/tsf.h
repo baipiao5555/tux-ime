@@ -2,6 +2,7 @@
 
 #include <atlcomcli.h>
 #include <msctf.h>
+#include <string>
 
 namespace fcitx {
 class Tsf : public ITfTextInputProcessorEx,
@@ -78,7 +79,15 @@ class Tsf : public ITfTextInputProcessorEx,
     // ITfKeyEventSink
     bool initKeyEventSink();
     void uninitKeyEventSink();
-    BOOL processKey(WPARAM wParam, LPARAM lParam);
-    BOOL keyDownHandled_ = false;
+    bool shouldHandleKey(WPARAM wParam, LPARAM lParam) const;
+    void handleKey(WPARAM wParam, LPARAM lParam);
+    bool requestEditSession();
+    void clearCompositionState();
+
+    std::wstring compositionText_;
+    CComPtr<ITfComposition> composition_;
+    CComPtr<ITfRange> compositionRange_;
+    bool pendingCommit_ = false;
+    bool pendingCancel_ = false;
 };
 } // namespace fcitx

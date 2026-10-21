@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-#define FCITX5 "Fcitx5"
+#define FCITX5 "Tux IME"
 #define THREADING_MODEL "ThreadingModel"
 #define APARTMENT "Apartment"
 

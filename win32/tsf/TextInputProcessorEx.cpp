@@ -6,6 +6,7 @@ STDAPI Tsf::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId) {
 }
 
 STDAPI Tsf::Deactivate() {
+    clearCompositionState();
     initTextEditSink(CComPtr<ITfDocumentMgr>());
     uninitThreadMgrEventSink();
     uninitKeyEventSink();
