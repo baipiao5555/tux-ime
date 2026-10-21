@@ -57,8 +57,8 @@ class ClassFactory : public IClassFactory {
 
 ClassFactory *factory = nullptr;
 
-__declspec(dllexport) STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid,
-                                               void **ppvObject) {
+STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid,
+                         void **ppvObject) {
     if (factory == nullptr) {
         EnterCriticalSection(&CS);
         if (factory == nullptr) {
@@ -75,15 +75,15 @@ __declspec(dllexport) STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid,
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-__declspec(dllexport) STDAPI DllCanUnloadNow() { return dllRefCount == 0; }
+STDAPI DllCanUnloadNow() { return dllRefCount == 0; }
 
-__declspec(dllexport) STDAPI DllUnregisterServer() {
+STDAPI DllUnregisterServer() {
     fcitx::UnregisterCategoriesAndProfiles();
     fcitx::UnregisterServer();
     return S_OK;
 }
 
-__declspec(dllexport) STDAPI DllRegisterServer() {
+STDAPI DllRegisterServer() {
     if (fcitx::RegisterServer() && fcitx::RegisterProfiles() &&
         fcitx::RegisterCategories()) {
         return S_OK;

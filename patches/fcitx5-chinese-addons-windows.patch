@@ -1,0 +1,37 @@
+diff --git a/im/pinyin/pinyin.cpp b/im/pinyin/pinyin.cpp
+index 7047c16..e9e1787 100644
+--- a/im/pinyin/pinyin.cpp
++++ b/im/pinyin/pinyin.cpp
+@@ -1035,8 +1035,9 @@ void PinyinEngine::loadSymbols(const UnixFD &file) {
+     }
+ }
+ 
+-void PinyinEngine::loadDict(const std::string &fullPath,
+-                            std::list<std::unique_ptr<TaskToken>> &taskTokens) {
++void PinyinEngine::loadDict(
++    const std::filesystem::path &fullPath,
++    std::list<std::unique_ptr<TaskToken>> &taskTokens) {
+     if (fullPath.empty()) {
+         return;
+     }
+diff --git a/im/pinyin/pinyin.h b/im/pinyin/pinyin.h
+index 3023307..04b5e71 100644
+--- a/im/pinyin/pinyin.h
++++ b/im/pinyin/pinyin.h
+@@ -42,6 +42,7 @@
+ #include <libime/pinyin/pinyincontext.h>
+ #include <libime/pinyin/pinyinime.h>
+ #include <libime/pinyin/pinyinprediction.h>
++#include <filesystem>
+ #include <list>
+ #include <memory>
+ #include <optional>
+@@ -497,7 +498,7 @@ private:
+     void loadExtraDict();
+     void loadCustomPhrase();
+     void loadSymbols(const UnixFD &file);
+-    void loadDict(const std::string &fullPath,
++    void loadDict(const std::filesystem::path &fullPath,
+                   std::list<std::unique_ptr<TaskToken>> &taskTokens);
+     void saveCustomPhrase();
+ 

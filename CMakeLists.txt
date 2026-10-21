@@ -24,7 +24,16 @@ option(ENABLE_EMOJI "" OFF)
 option(ENABLE_LIBUUID "" OFF)
 option(BUILD_SPELL_DICT "" OFF)
 
-set(CMAKE_INSTALL_PREFIX C:)
+if(NOT DEFINED CMAKE_INSTALL_PREFIX)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/prefix")
+endif()
+# Fcitx on Windows resolves its data directory relative to the executable:
+# <prefix>/bin, <prefix>/lib/fcitx5, <prefix>/data/fcitx5.
+set(CMAKE_INSTALL_BINDIR "bin")
+set(CMAKE_INSTALL_LIBDIR "lib")
+set(CMAKE_INSTALL_INCLUDEDIR "include")
+set(CMAKE_INSTALL_DATADIR "data")
+set(CMAKE_INSTALL_LOCALEDIR "data/locale")
 set(ENV{PKG_CONFIG_PATH} "${CMAKE_SYSROOT}/lib/pkgconfig")
 # For std::osyncstream
 add_compile_options(-fexperimental-library)
@@ -33,4 +42,15 @@ add_subdirectory(fcitx5)
 target_compile_definitions(Fcitx5Utils PUBLIC -DFcitx5Utils_EXPORTS)
 target_compile_definitions(Fcitx5Core PUBLIC -DFcitx5Core_EXPORTS)
 
+set(FCITX_INSTALL_ADDONDIR "${CMAKE_INSTALL_PREFIX}/lib/fcitx5")
+set(FCITX_INSTALL_PKGDATADIR "${CMAKE_INSTALL_PREFIX}/data/fcitx5")
+add_subdirectory(fcitx5-extras)
 add_subdirectory(src)
+
+add_executable(tux-ime-test tools/tux-ime-test.cpp)
+target_link_libraries(tux-ime-test Fcitx5::Core)
+install(TARGETS tux-ime-test DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+add_executable(tux-client-test tools/tux-client-test.cpp)
+target_include_directories(tux-client-test PRIVATE "${CMAKE_SOURCE_DIR}")
+install(TARGETS tux-client-test DESTINATION "${CMAKE_INSTALL_BINDIR}")

@@ -1,4 +1,7 @@
-add_executable(Fcitx5 main.cpp)
-target_link_libraries(Fcitx5 Fcitx5::Core)
-
-install(TARGETS Fcitx5 DESTINATION "${FCITX_INSTALL_BINDIR}")
+add_executable(tuxime-server
+    main.cpp
+    server.cpp
+)
+target_include_directories(tuxime-server PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(tuxime-server Fcitx5::Core)
+install(TARGETS tuxime-server DESTINATION "${CMAKE_INSTALL_BINDIR}")

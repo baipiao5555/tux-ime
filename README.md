@@ -1,7 +1,7 @@
 # Tux IME（Tux 输入法）
 
-> 工作名，独立 Windows 输入法项目，基于 Fcitx5 的输入法核心和 Windows TSF 前端。
-> 不是小狼毫改版，也不会复用 Weasel 的输入法身份。
+> 独立 Windows 输入法项目，基于 Fcitx5 输入法核心和 Windows TSF 前端。
+> 不复用小狼毫/Weasel 的输入法身份，可与官方小狼毫并存。
 
 ## 目标
 
@@ -11,40 +11,97 @@
 - 候选窗、预编辑、分页、主题
 - 插件式能力：剪贴板历史/同步、快捷短语、符号、Emoji
 - 设置属于输入法本身，不是一个独立的设置中心
-- 独立 TSF CLSID、独立安装目录、独立用户目录，可与官方小狼毫并存
+- 独立 TSF CLSID、独立安装目录、独立用户目录
 
 ## 当前状态
 
-**早期脚手架，不可日常使用。**
+**可试用的早期版本。**
 
-- 上游 `fcitx5-windows` 的 Windows TSF 骨架已拉入
-- 目前 TSF 只做注册/组合文本的验证，尚未接入 Fcitx5 的输入上下文和候选窗
-- 不会安装到当前用户的日常输入法；开发/测试应在独立虚拟机或测试账号里进行
+已经完成：
+
+- Fcitx5 5.1.22 核心、libime 1.1.17、fcitx5-chinese-addons 5.1.15 的 Windows 构建
+- 拼音引擎、用户词典、模糊拼音配置（Fcitx5 addon 配置）
+- `tuxime-server.exe`：嵌入 Fcitx5，提供命名管道服务
+- `tuxime-x86_64.dll`：独立 TSF CLSID/Profile，支持组合文本、提交、候选选择和回车/退格/ESC
+- 候选窗：GDI+ 分层窗口，跟随光标，数字键选择
+- 服务端与 TSF 前端通过按用户 SID 隔离的命名管道通信
+
+尚未完成：
+
+- 内置设置窗口（当前通过 Fcitx5 配置文件和托盘/后续版本）
+- 剪贴板同步（SyncClipboard 协议）
+- 安装器、自动更新、32 位 TSF
+- 主题、候选窗鼠标选择、分页按钮
 
 ## 技术路线
 
-- 输入引擎：Fcitx5（pinyin、table、clipboard、quickphrase 等 addon）
+- 输入引擎：Fcitx5 + libime + fcitx5-chinese-addons
 - Windows 接入：TSF text service
-- UI：优先复用/移植 Fcitx5 的 UI 组件；没有可用的 Windows UI 时再补最小候选窗
-- 设置：作为输入法内置模块，不另做独立设置中心
+- 进程模型：TSF DLL 通过命名管道连接常驻的 `tuxime-server.exe`，引擎和词典只在服务端加载
+- UI：GDI+ 候选窗；设置作为服务端内置窗口
 
 ## 构建
 
-上游工程的构建方式见 `CMakeLists.txt` 和 `.github/workflows/ci.yml`。Windows TSF 部分在 `win32/`，需要 CMake、Ninja 和 Clang（MSYS2 clang64）。
+依赖：Windows 10/11 x64、Visual Studio 2022 Build Tools（C++ 桌面开发 + ATL）、CMake、Ninja、MSYS2 clang64（clang、CMake、Ninja、pkgconf、gettext、boost、libuv、zstd）。
 
 ```powershell
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+# 1. 初始化子模块（含 libime 的 kenlm 子模块）
+git submodule update --init --recursive
+
+# 2. 应用 Windows 构建补丁
+git -C libime apply ../patches/libime-windows.patch
+git -C fcitx5-chinese-addons apply ../patches/fcitx5-chinese-addons-windows.patch
+
+# 3. 在 MSYS2 clang64 环境下构建并安装核心依赖
+$env:MSYS2_ROOT = "C:/msys64"
+$env:PATH = "C:/msys64/clang64/bin;$env:PATH"
+$env:PKG_CONFIG_PATH = "C:/msys64/clang64/lib/pkgconfig"
+
+cmake -B build/core -G Ninja -S . -DCMAKE_BUILD_TYPE=Release -DARCH=AMD64 `
+  -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+cmake --build build/core
+cmake --install build/core
+
+# libime / fcitx5-chinese-addons 的配置参数见 win32/CMakeLists.txt 和 CI
+# 4. 构建 TSF DLL（在 Visual Studio 开发者命令行里）
+cmake -B build/win32 -G Ninja -S win32 -DCMAKE_BUILD_TYPE=Release
+cmake --build build/win32
 ```
+
+构建产物布局（运行时期望）：
+
+```
+TuxIME/
+  bin/tuxime-server.exe
+  bin/tuxime-x86_64.dll
+  bin/*.dll
+  lib/fcitx5/*.dll
+  lib/libime/*
+  data/fcitx5/*
+  data/libime/*
+```
+
+## 安装/测试
+
+1. 把上面的目录放到一个测试位置。
+2. 以管理员身份运行：
+   `regsvr32 /s <路径>\bin\tuxime-x86_64.dll`
+3. 在 Windows 设置里把 “Tux IME” 加入中文输入法，或临时用
+   `Set-WinDefaultInputMethodOverride` 指向
+   `0804:{8D7031FD-4D2D-4CCE-BB41-05F54D7AC612}{76AE52E2-7F68-4A6D-81D0-A48D4AC73E36}`。
+4. 卸载：`regsvr32 /u /s <路径>\bin\tuxime-x86_64.dll`。
+
+日常使用前请先备份当前输入法配置；开发版本可能崩溃。
 
 ## 上游与授权
 
 - [fcitx5](https://github.com/fcitx/fcitx5)：LGPL-2.1-or-later
-- [weasel](https://github.com/rime/weasel)：GPL-3.0-only（上游 fcitx5-windows 的 TSF 参考来源）
+- [libime](https://github.com/fcitx/libime)：LGPL-2.1-or-later
+- [fcitx5-chinese-addons](https://github.com/fcitx/fcitx5-chinese-addons)：LGPL-2.1-or-later
+- [fcitx5-windows](https://github.com/fcitx-contrib/fcitx5-windows)：TSF 骨架来源
 - 本仓库保留上游 LICENSE 和版权声明
 
 ## 非目标
 
 - 不伪装成 Fcitx 官方 Windows 版
 - 不复用官方小狼毫的 CLSID、DLL 名、命名管道或注册表键
-- 不在用户日常输入法上直接实验

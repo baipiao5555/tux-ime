@@ -1,4 +1,8 @@
 build
+build-win32-local.bat
 dist
+prefix
 .cache
 .mimosa/
+*.png
+installer/*.exe

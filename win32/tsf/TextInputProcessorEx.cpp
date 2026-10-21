@@ -7,6 +7,15 @@ STDAPI Tsf::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId) {
 
 STDAPI Tsf::Deactivate() {
     clearCompositionState();
+    if (server_) {
+        server_->focusOut();
+        server_->disconnect();
+        server_.reset();
+    }
+    if (candidateWindow_) {
+        candidateWindow_->hide();
+        candidateWindow_.reset();
+    }
     initTextEditSink(CComPtr<ITfDocumentMgr>());
     uninitThreadMgrEventSink();
     uninitKeyEventSink();
@@ -20,6 +29,11 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
     CComPtr<ITfDocumentMgr> documentMgr;
     threadMgr_ = pThreadMgr;
     clientId_ = tfClientId;
+
+    server_ = std::make_unique<ServerClient>();
+    server_->connect();
+    candidateWindow_ = std::make_unique<CandidateWindow>();
+
     if (!initThreadMgrEventSink()) {
         goto ActivateExError;
     }

@@ -34,14 +34,25 @@ STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
     clearCompositionState();
     initTextEditSink(pDocMgrFocus);
+    if (server_) {
+        if (pDocMgrFocus) {
+            server_->focusIn();
+        } else {
+            server_->focusOut();
+        }
+    }
     return S_OK;
 }
 
 STDMETHODIMP Tsf::OnPushContext(ITfContext *pContext) { return S_OK; }
 
 STDMETHODIMP Tsf::OnPopContext(ITfContext *pContext) {
-    if (textEditSinkContext_ && pContext == textEditSinkContext_)
+    if (textEditSinkContext_ && pContext == textEditSinkContext_) {
         clearCompositionState();
+        if (server_) {
+            server_->focusOut();
+        }
+    }
     return S_OK;
 }
 } // namespace fcitx

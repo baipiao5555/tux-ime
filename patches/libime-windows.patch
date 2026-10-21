@@ -1,0 +1,106 @@
+diff --git a/data/CMakeLists.txt b/data/CMakeLists.txt
+index 668ae44..f7c5892 100644
+--- a/data/CMakeLists.txt
++++ b/data/CMakeLists.txt
+@@ -12,14 +12,14 @@ set(LM_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sc.lm")
+ set(LM_PREDICT_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sc.lm.predict")
+ add_custom_command(
+   OUTPUT "${LM_OUTPUT}"
+-  DEPENDS "${LM_SRC}" LibIME::slm_build_binary
+-  COMMAND LibIME::slm_build_binary -s -a 22 -q 4 trie "${LM_SRC}" "${LM_OUTPUT}")
++  DEPENDS "${LM_SRC}" libime_slm_build_binary
++  COMMAND $<TARGET_FILE:libime_slm_build_binary> -s -a 22 -q 4 trie "${LM_SRC}" "${LM_OUTPUT}")
+ add_custom_target(lm ALL DEPENDS "${LM_OUTPUT}")
+ 
+ add_custom_command(
+   OUTPUT "${LM_PREDICT_OUTPUT}"
+-  DEPENDS "${LM_SRC}" lm LibIME::prediction
+-  COMMAND LibIME::prediction "${LM_OUTPUT}" "${LM_SRC}" "${LM_PREDICT_OUTPUT}")
++  DEPENDS "${LM_SRC}" lm libime_prediction
++  COMMAND $<TARGET_FILE:libime_prediction> "${LM_OUTPUT}" "${LM_SRC}" "${LM_PREDICT_OUTPUT}")
+ add_custom_target(lm-predict ALL DEPENDS "${LM_PREDICT_OUTPUT}")
+ 
+ install(FILES "${LM_OUTPUT}" RENAME zh_CN.lm DESTINATION "${LIBIME_INSTALL_LIBDATADIR}")
+@@ -37,15 +37,15 @@ set(DICT_SRC "${CMAKE_CURRENT_BINARY_DIR}/dict_sc.txt")
+ set(DICT_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sc.dict")
+ add_custom_command(
+   OUTPUT "${DICT_OUTPUT}"
+-  DEPENDS "${DICT_SRC}" LibIME::pinyindict
+-  COMMAND LibIME::pinyindict "${DICT_SRC}" "${DICT_OUTPUT}")
++  DEPENDS "${DICT_SRC}" libime_pinyindict
++  COMMAND $<TARGET_FILE:libime_pinyindict> "${DICT_SRC}" "${DICT_OUTPUT}")
+ 
+ set(DICT_EXTB_SRC "${CMAKE_CURRENT_BINARY_DIR}/dict_extb.txt")
+ set(DICT_EXTB_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/extb.dict")
+ add_custom_command(
+   OUTPUT "${DICT_EXTB_OUTPUT}"
+-  DEPENDS "${DICT_EXTB_SRC}" LibIME::pinyindict
+-  COMMAND LibIME::pinyindict "${DICT_EXTB_SRC}" "${DICT_EXTB_OUTPUT}")
++  DEPENDS "${DICT_EXTB_SRC}" libime_pinyindict
++  COMMAND $<TARGET_FILE:libime_pinyindict> "${DICT_EXTB_SRC}" "${DICT_EXTB_OUTPUT}")
+ add_custom_target(dict ALL DEPENDS "${DICT_OUTPUT}" "${DICT_EXTB_OUTPUT}")
+ install(FILES "${DICT_OUTPUT}" "${DICT_EXTB_OUTPUT}" DESTINATION "${LIBIME_INSTALL_PKGDATADIR}")
+ 
+@@ -62,8 +62,8 @@ set(TABLE_DICT_FILES)
+ foreach(TABLE_TXT_FILE ${TABLE_TXT_FILES})
+   string(REPLACE .txt .main.dict TABLE_DICT_FILE ${TABLE_TXT_FILE})
+   add_custom_command(OUTPUT ${TABLE_DICT_FILE}
+-                     DEPENDS ${TABLE_TXT_FILE} LibIME::tabledict
+-                     COMMAND LibIME::tabledict ${TABLE_TXT_FILE} ${CMAKE_CURRENT_BINARY_DIR}/${TABLE_DICT_FILE})
++                     DEPENDS ${TABLE_TXT_FILE} libime_tabledict
++                     COMMAND $<TARGET_FILE:libime_tabledict> ${TABLE_TXT_FILE} ${CMAKE_CURRENT_BINARY_DIR}/${TABLE_DICT_FILE})
+   list(APPEND TABLE_DICT_FILES ${CMAKE_CURRENT_BINARY_DIR}/${TABLE_DICT_FILE})
+ endforeach()
+ 
+diff --git a/src/libime/core/LibIMECoreConfig.cmake.in b/src/libime/core/LibIMECoreConfig.cmake.in
+index fcc6989..dec4fc8 100644
+--- a/src/libime/core/LibIMECoreConfig.cmake.in
++++ b/src/libime/core/LibIMECoreConfig.cmake.in
+@@ -8,19 +8,19 @@ find_dependency(Fcitx5Utils)
+ if(NOT TARGET LibIME::slm_build_binary)
+     add_executable(LibIME::slm_build_binary IMPORTED)
+     set_target_properties(LibIME::slm_build_binary PROPERTIES
+-        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_slm_build_binary")
++        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_slm_build_binary@CMAKE_EXECUTABLE_SUFFIX@")
+ endif()
+ 
+ if(NOT TARGET LibIME::prediction)
+     add_executable(LibIME::prediction IMPORTED)
+     set_target_properties(LibIME::prediction PROPERTIES
+-        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_prediction")
++        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_prediction@CMAKE_EXECUTABLE_SUFFIX@")
+ endif()
+ 
+ if(NOT TARGET LibIME::history)
+     add_executable(LibIME::history IMPORTED)
+     set_target_properties(LibIME::history PROPERTIES
+-        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_history")
++        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_history@CMAKE_EXECUTABLE_SUFFIX@")
+ endif()
+ 
+ include("${CMAKE_CURRENT_LIST_DIR}/LibIMECoreTargets.cmake")
+diff --git a/src/libime/pinyin/LibIMEPinyinConfig.cmake.in b/src/libime/pinyin/LibIMEPinyinConfig.cmake.in
+index d56c637..f6d3caf 100644
+--- a/src/libime/pinyin/LibIMEPinyinConfig.cmake.in
++++ b/src/libime/pinyin/LibIMEPinyinConfig.cmake.in
+@@ -10,6 +10,6 @@ include("${CMAKE_CURRENT_LIST_DIR}/LibIMEPinyinTargets.cmake")
+ if(NOT TARGET LibIME::pinyindict)
+     add_executable(LibIME::pinyindict IMPORTED)
+     set_target_properties(LibIME::pinyindict PROPERTIES
+-        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_pinyindict")
++        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_pinyindict@CMAKE_EXECUTABLE_SUFFIX@")
+ endif()
+ 
+diff --git a/src/libime/table/LibIMETableConfig.cmake.in b/src/libime/table/LibIMETableConfig.cmake.in
+index 2b7fadd..9c1d963 100644
+--- a/src/libime/table/LibIMETableConfig.cmake.in
++++ b/src/libime/table/LibIMETableConfig.cmake.in
+@@ -10,7 +10,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/LibIMETableTargets.cmake")
+ if(NOT TARGET LibIME::tabledict)
+     add_executable(LibIME::tabledict IMPORTED)
+     set_target_properties(LibIME::tabledict PROPERTIES
+-        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_tabledict")
++        IMPORTED_LOCATION "@CMAKE_INSTALL_FULL_BINDIR@/libime_tabledict@CMAKE_EXECUTABLE_SUFFIX@")
+ endif()
+ 
+ 

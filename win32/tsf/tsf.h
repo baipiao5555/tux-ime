@@ -1,8 +1,13 @@
 #pragma once
 
-#include <atlcomcli.h>
+#include "com_ptr.h"
 #include <msctf.h>
+#include <memory>
 #include <string>
+#include <vector>
+
+#include "CandidateWindow.h"
+#include "ServerClient.h"
 
 namespace fcitx {
 class Tsf : public ITfTextInputProcessorEx,
@@ -80,14 +85,23 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initKeyEventSink();
     void uninitKeyEventSink();
     bool shouldHandleKey(WPARAM wParam, LPARAM lParam) const;
-    void handleKey(WPARAM wParam, LPARAM lParam);
+    void handleKey(WPARAM wParam, LPARAM lParam, BOOL *pfEaten);
     bool requestEditSession();
     void clearCompositionState();
+    void applyServerResult(const ServerKeyResult &result);
+    void updateCandidateWindow(const RECT &caret);
+    RECT caretRect() const;
+    void connectServer();
 
-    std::wstring compositionText_;
+    std::unique_ptr<ServerClient> server_;
+    std::unique_ptr<CandidateWindow> candidateWindow_;
+    std::wstring preedit_;
+    std::wstring pendingCommit_;
+    std::vector<ServerCandidate> candidates_;
+    int selectedCandidate_ = 0;
     CComPtr<ITfComposition> composition_;
     CComPtr<ITfRange> compositionRange_;
-    bool pendingCommit_ = false;
     bool pendingCancel_ = false;
+    bool endingComposition_ = false;
 };
 } // namespace fcitx

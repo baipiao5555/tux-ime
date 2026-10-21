@@ -1,5 +1,4 @@
 #include "tsf.h"
-#include <cwctype>
 
 namespace fcitx {
 bool Tsf::initKeyEventSink() {
@@ -20,28 +19,56 @@ void Tsf::uninitKeyEventSink() {
 }
 
 bool Tsf::shouldHandleKey(WPARAM wParam, LPARAM) const {
-    if (!textEditSinkContext_)
+    if (!textEditSinkContext_ || !server_ || !server_->connected()) {
         return false;
-    if (GetKeyState(VK_CONTROL) & 0x8000)
-        return false;
-    if (GetKeyState(VK_MENU) & 0x8000)
-        return false;
+    }
 
-    if (wParam >= 'A' && wParam <= 'Z')
+    const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    if (ctrl && wParam == VK_SPACE) {
         return true;
-
-    // Only consume navigation/editing keys while a composition is active.
-    if (compositionText_.empty())
+    }
+    if (ctrl || alt) {
         return false;
+    }
 
-    return wParam == VK_BACK || wParam == VK_ESCAPE ||
-           wParam == VK_RETURN || wParam == VK_SPACE ||
-           (wParam >= '0' && wParam <= '9');
+    if (wParam >= 'A' && wParam <= 'Z') {
+        return true;
+    }
+
+    if (preedit_.empty() && candidates_.empty()) {
+        return false;
+    }
+
+    switch (wParam) {
+    case VK_BACK:
+    case VK_ESCAPE:
+    case VK_RETURN:
+    case VK_SPACE:
+    case VK_TAB:
+    case VK_DELETE:
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_UP:
+    case VK_DOWN:
+    case VK_HOME:
+    case VK_END:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_OEM_COMMA:
+    case VK_OEM_PERIOD:
+    case VK_OEM_MINUS:
+    case VK_OEM_PLUS:
+        return true;
+    default:
+        return wParam >= '0' && wParam <= '9';
+    }
 }
 
 bool Tsf::requestEditSession() {
-    if (!textEditSinkContext_ || clientId_ == TF_CLIENTID_NULL)
+    if (!textEditSinkContext_ || clientId_ == TF_CLIENTID_NULL) {
         return false;
+    }
 
     HRESULT sessionResult = E_FAIL;
     return SUCCEEDED(textEditSinkContext_->RequestEditSession(
@@ -49,33 +76,84 @@ bool Tsf::requestEditSession() {
         &sessionResult));
 }
 
-void Tsf::handleKey(WPARAM wParam, LPARAM) {
-    if (wParam >= 'A' && wParam <= 'Z') {
-        wchar_t c = static_cast<wchar_t>(wParam);
-        if (!(GetKeyState(VK_SHIFT) & 0x8000))
-            c = static_cast<wchar_t>(std::towlower(c));
-        compositionText_.push_back(c);
-        pendingCommit_ = false;
-        pendingCancel_ = false;
-    } else if (wParam == VK_BACK) {
-        if (!compositionText_.empty())
-            compositionText_.pop_back();
-        if (compositionText_.empty())
-            pendingCancel_ = true;
-    } else if (wParam == VK_ESCAPE) {
-        pendingCancel_ = true;
-    } else if (wParam == VK_RETURN) {
-        pendingCommit_ = true;
-    } else if (wParam == VK_SPACE) {
-        compositionText_.push_back(L' ');
-    } else if (wParam >= '0' && wParam <= '9') {
-        compositionText_.push_back(static_cast<wchar_t>(wParam));
+RECT Tsf::caretRect() const {
+    GUITHREADINFO info{};
+    info.cbSize = sizeof(info);
+    if (GetGUIThreadInfo(GetCurrentThreadId(), &info) && info.hwndCaret) {
+        POINT topLeft{info.rcCaret.left, info.rcCaret.top};
+        POINT bottomRight{info.rcCaret.right, info.rcCaret.bottom};
+        ClientToScreen(info.hwndCaret, &topLeft);
+        ClientToScreen(info.hwndCaret, &bottomRight);
+        return {topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
     }
 
-    requestEditSession();
+    POINT point{0, 0};
+    GetCaretPos(&point);
+    HWND focus = GetFocus();
+    if (focus) {
+        ClientToScreen(focus, &point);
+    }
+    return {point.x, point.y, point.x + 1, point.y + 20};
 }
 
-STDMETHODIMP Tsf::OnSetFocus(BOOL fForeground) { return S_OK; }
+void Tsf::updateCandidateWindow(const RECT &caret) {
+    if (!candidateWindow_) {
+        return;
+    }
+    if (candidates_.empty()) {
+        candidateWindow_->hide();
+        return;
+    }
+    candidateWindow_->update(candidates_, selectedCandidate_, caret);
+}
+
+void Tsf::applyServerResult(const ServerKeyResult &result) {
+    if (!result.ok) {
+        return;
+    }
+    if (!result.commit.empty()) {
+        pendingCommit_ += result.commit;
+    }
+    preedit_ = result.preedit;
+    candidates_ = result.candidates;
+    selectedCandidate_ = result.selected;
+    pendingCancel_ = false;
+
+    const RECT caret = caretRect();
+    if (server_) {
+        server_->setCursor(caret);
+    }
+    requestEditSession();
+    updateCandidateWindow(caret);
+}
+
+void Tsf::handleKey(WPARAM wParam, LPARAM lParam, BOOL *pfEaten) {
+    *pfEaten = FALSE;
+    if (!server_ || !server_->connect()) {
+        return;
+    }
+
+    const RECT caret = caretRect();
+    server_->setCursor(caret);
+
+    const ServerKeyResult result = server_->sendKey(wParam, lParam, false);
+    if (!result.ok) {
+        return;
+    }
+    applyServerResult(result);
+    *pfEaten = result.handled ? TRUE : FALSE;
+}
+
+STDMETHODIMP Tsf::OnSetFocus(BOOL fForeground) {
+    if (server_) {
+        if (fForeground) {
+            server_->focusIn();
+        } else {
+            server_->focusOut();
+        }
+    }
+    return S_OK;
+}
 
 STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
                                 LPARAM lParam, BOOL *pfEaten) {
@@ -86,8 +164,7 @@ STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
 STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
                             BOOL *pfEaten) {
     if (shouldHandleKey(wParam, lParam)) {
-        handleKey(wParam, lParam);
-        *pfEaten = TRUE;
+        handleKey(wParam, lParam, pfEaten);
     } else {
         *pfEaten = FALSE;
     }
