@@ -246,6 +246,16 @@ PinyinSettings SettingsStore::loadPinyin() {
     settings.fuzzyEn = boolValue(iniValue(lines, "Fuzzy", "EN_ENG", "False"));
     settings.fuzzyIn = boolValue(iniValue(lines, "Fuzzy", "IN_ING", "False"));
     settings.fuzzyF = boolValue(iniValue(lines, "Fuzzy", "F_H", "False"));
+    settings.spellEnabled = boolValue(iniValue(lines, "", "SpellEnabled", "True"));
+    settings.symbolsEnabled =
+        boolValue(iniValue(lines, "", "SymbolsEnabled", "True"));
+    settings.chaiziEnabled =
+        boolValue(iniValue(lines, "", "ChaiziEnabled", "True"));
+    settings.extBEnabled = boolValue(iniValue(lines, "", "ExtBEnabled", "True"));
+    settings.predictionEnabled =
+        boolValue(iniValue(lines, "", "Prediction", "False"));
+    settings.pinyinInPreedit =
+        boolValue(iniValue(lines, "", "PinyinInPreedit", "False"));
 
     const auto profile = readLines(profilePath());
     settings.defaultInputMethod =
@@ -295,6 +305,18 @@ void SettingsStore::savePinyin(const PinyinSettings &settings) {
                 settings.fuzzyIn ? "True" : "False");
     setIniValue(path, "Fuzzy", "F_H",
                 settings.fuzzyF ? "True" : "False");
+    setIniValue(path, "", "SpellEnabled",
+                settings.spellEnabled ? "True" : "False");
+    setIniValue(path, "", "SymbolsEnabled",
+                settings.symbolsEnabled ? "True" : "False");
+    setIniValue(path, "", "ChaiziEnabled",
+                settings.chaiziEnabled ? "True" : "False");
+    setIniValue(path, "", "ExtBEnabled",
+                settings.extBEnabled ? "True" : "False");
+    setIniValue(path, "", "Prediction",
+                settings.predictionEnabled ? "True" : "False");
+    setIniValue(path, "", "PinyinInPreedit",
+                settings.pinyinInPreedit ? "True" : "False");
     setIniValue(profilePath(), "Groups/0", "DefaultIM",
                 settings.defaultInputMethod.empty()
                     ? "pinyin"

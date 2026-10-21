@@ -1,10 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 #include <windows.h>
 
 #include "settings.h"
@@ -14,6 +16,11 @@ namespace tuxime {
 class ClipboardSync {
 public:
     using StatusCallback = std::function<void(const std::wstring &)>;
+
+    struct Entry {
+        std::wstring text;
+        std::wstring hash;
+    };
 
     ClipboardSync();
     ~ClipboardSync();
@@ -28,6 +35,10 @@ public:
     std::wstring testConnection(const SyncConfig &config) const;
     bool running() const { return running_; }
 
+    std::vector<Entry> history() const;
+    void clearHistory();
+    void requestCopy(const std::wstring &text);
+
 private:
     void run();
     void onClipboardUpdate();
@@ -37,7 +48,9 @@ private:
     std::wstring readClipboardText() const;
     void report(const std::wstring &status);
     SyncConfig config() const;
-
+    void addHistory(const std::wstring &text);
+    void loadHistory();
+    void saveHistory();
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT message,
                                        WPARAM wParam, LPARAM lParam);
 
@@ -52,6 +65,8 @@ private:
     std::wstring lastHash_;
     std::wstring lastAppliedHash_;
     std::string lastEtag_;
+    mutable std::mutex historyMutex_;
+    std::deque<Entry> history_;
 };
 
 bool validateSyncUrl(const std::string &url, std::wstring &error);

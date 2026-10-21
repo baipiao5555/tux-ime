@@ -23,6 +23,12 @@ struct PinyinSettings {
     bool fuzzyEn = false;
     bool fuzzyIn = false;
     bool fuzzyF = false;
+    bool spellEnabled = true;
+    bool symbolsEnabled = true;
+    bool chaiziEnabled = true;
+    bool extBEnabled = true;
+    bool predictionEnabled = false;
+    bool pinyinInPreedit = false;
 };
 
 class SettingsStore {

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
+#include <fstream>
 #include <sstream>
 #include <vector>
 
@@ -105,6 +106,35 @@ std::string base64Encode(const std::string &data) {
         result.push_back(i + 1 < data.size() ? table[(value >> 6) & 0x3f]
                                              : '=');
         result.push_back(i + 2 < data.size() ? table[value & 0x3f] : '=');
+    }
+    return result;
+}
+
+std::string base64Decode(const std::string &text) {
+    int table[256];
+    std::fill(std::begin(table), std::end(table), -1);
+    const std::string alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (int i = 0; i < 64; ++i) {
+        table[static_cast<unsigned char>(alphabet[i])] = i;
+    }
+    std::string result;
+    uint32_t value = 0;
+    int bits = 0;
+    for (unsigned char c : text) {
+        if (c == '=') {
+            break;
+        }
+        const int digit = table[c];
+        if (digit < 0) {
+            continue;
+        }
+        value = (value << 6) | static_cast<uint32_t>(digit);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            result.push_back(static_cast<char>((value >> bits) & 0xff));
+        }
     }
     return result;
 }
@@ -589,6 +619,7 @@ bool ClipboardSync::start(const SyncConfig &config, StatusCallback callback) {
     if (thread_.joinable()) {
         return true;
     }
+    loadHistory();
     stopping_ = false;
     running_ = true;
     thread_ = std::thread([this]() { run(); });
@@ -671,6 +702,92 @@ std::wstring ClipboardSync::readClipboardText() const {
     return result;
 }
 
+void ClipboardSync::addHistory(const std::wstring &text) {
+    if (text.empty() || text.size() > 1000000) {
+        return;
+    }
+    Entry entry{text, sha256Hex(text)};
+    {
+        std::lock_guard<std::mutex> lock(historyMutex_);
+        if (!history_.empty() && history_.front().hash == entry.hash) {
+            return;
+        }
+        std::erase_if(history_, [&entry](const Entry &existing) {
+            return existing.hash == entry.hash;
+        });
+        history_.push_front(std::move(entry));
+        while (history_.size() > 50) {
+            history_.pop_back();
+        }
+    }
+    saveHistory();
+}
+
+std::vector<ClipboardSync::Entry> ClipboardSync::history() const {
+    std::lock_guard<std::mutex> lock(historyMutex_);
+    return {history_.begin(), history_.end()};
+}
+
+void ClipboardSync::clearHistory() {
+    {
+        std::lock_guard<std::mutex> lock(historyMutex_);
+        history_.clear();
+    }
+    saveHistory();
+}
+
+void ClipboardSync::requestCopy(const std::wstring &text) {
+    if (hwnd_) {
+        PostMessageW(hwnd_, WM_APP + 3, 0,
+                     reinterpret_cast<LPARAM>(new std::wstring(text)));
+    }
+}
+
+void ClipboardSync::loadHistory() {
+    std::ifstream in(SettingsStore::appDataDir() / "clipboard_history.txt",
+                     std::ios::binary);
+    std::string line;
+    std::deque<Entry> entries;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        const std::string utf8 = base64Decode(line);
+        if (utf8.empty()) {
+            continue;
+        }
+        std::wstring text = toWide(utf8);
+        if (text.empty()) {
+            continue;
+        }
+        entries.push_back({std::move(text), {}});
+        if (entries.size() >= 50) {
+            break;
+        }
+    }
+    for (auto &entry : entries) {
+        entry.hash = sha256Hex(entry.text);
+    }
+    std::lock_guard<std::mutex> lock(historyMutex_);
+    history_ = std::move(entries);
+}
+
+void ClipboardSync::saveHistory() {
+    std::deque<Entry> entries;
+    {
+        std::lock_guard<std::mutex> lock(historyMutex_);
+        entries = history_;
+    }
+    const auto path = SettingsStore::appDataDir() / "clipboard_history.txt";
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    for (const auto &entry : entries) {
+        out << base64Encode(toUtf8(entry.text)) << '\n';
+    }
+}
+
 bool ClipboardSync::pushText(const std::wstring &text) {
     const SyncConfig current = config();
     if (!current.enabled || text.empty() || text.size() > 1000000) {
@@ -699,11 +816,12 @@ bool ClipboardSync::pushText(const std::wstring &text) {
 
 void ClipboardSync::onClipboardUpdate() {
     const SyncConfig current = config();
-    if (!current.enabled) {
-        return;
-    }
     const std::wstring text = readClipboardText();
     if (text.empty()) {
+        return;
+    }
+    addHistory(text);
+    if (!current.enabled) {
         return;
     }
     const std::wstring hash = sha256Hex(text);
@@ -817,6 +935,14 @@ LRESULT CALLBACK ClipboardSync::windowProc(HWND hwnd, UINT message,
     case WM_APP + 2:
         self->onClipboardUpdate();
         return 0;
+    case WM_APP + 3: {
+        auto *text = reinterpret_cast<std::wstring *>(lParam);
+        if (text) {
+            self->setClipboardText(*text);
+            delete text;
+        }
+        return 0;
+    }
     case WM_CLOSE:
         PostQuitMessage(0);
         return 0;

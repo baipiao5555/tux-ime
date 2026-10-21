@@ -40,6 +40,7 @@ constexpr int kIdEnglish = 1006;
 constexpr int kIdTogglePunctuation = 1007;
 constexpr int kIdToggleFullwidth = 1008;
 constexpr int kIdToggleChttrans = 1009;
+constexpr int kIdClipboardHistory = 1010;
 constexpr int kIdInputMethodBase = 1100;
 
 struct InputMethodOption {
@@ -131,7 +132,7 @@ struct TrayIcon::Impl {
 
     void run();
     void showMenu();
-    void showSettings();
+    void showSettings(int page = 0);
     void updateStatus(const std::wstring &status);
     void destroyTray();
 
@@ -145,9 +146,8 @@ public:
     ~SettingsWindow();
 
     bool create();
-    void show();
+    void show(int page = -1);
     void setStatus(const std::wstring &status);
-
 private:
     bool createDevice();
     void destroyDevice();
@@ -290,6 +290,7 @@ void TrayIcon::Impl::showMenu() {
     AppendMenuW(menu, MF_STRING, kIdTogglePunctuation, L"切换中文标点");
     AppendMenuW(menu, MF_STRING, kIdToggleFullwidth, L"切换全角/半角");
     AppendMenuW(menu, MF_STRING, kIdToggleChttrans, L"切换简体/繁体");
+    AppendMenuW(menu, MF_STRING, kIdClipboardHistory, L"剪贴板历史...");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kIdSettings, L"设置...");
     AppendMenuW(menu, MF_STRING, kIdSyncNow, L"立即同步剪贴板");
@@ -306,7 +307,7 @@ void TrayIcon::Impl::showMenu() {
     PostMessageW(hwnd, WM_NULL, 0, 0);
 }
 
-void TrayIcon::Impl::showSettings() {
+void TrayIcon::Impl::showSettings(int page) {
     if (!settings) {
         settings = new SettingsWindow(*this);
         if (!settings->create()) {
@@ -315,7 +316,7 @@ void TrayIcon::Impl::showSettings() {
             return;
         }
     }
-    settings->show();
+    settings->show(page);
 }
 
 LRESULT CALLBACK TrayIcon::Impl::trayProc(HWND hwnd, UINT message,
@@ -382,6 +383,9 @@ LRESULT CALLBACK TrayIcon::Impl::trayProc(HWND hwnd, UINT message,
         case kIdToggleChttrans:
             self->server.toggleAddon("chttrans");
             self->updateStatus(L"已切换简体/繁体");
+            return 0;
+        case kIdClipboardHistory:
+            self->showSettings(1);
             return 0;
         case kIdSyncNow:
             self->server.clipboardSync().trigger();
@@ -585,7 +589,10 @@ void SettingsWindow::loadValues() {
     status_ = L"就绪";
 }
 
-void SettingsWindow::show() {
+void SettingsWindow::show(int page) {
+    if (page >= 0) {
+        page_ = page;
+    }
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
     SetTimer(hwnd_, 1, 16, nullptr);
@@ -744,6 +751,25 @@ void SettingsWindow::drawUi() {
             ImGui::EndTable();
         }
         ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::TextUnformatted("候选项与预编辑");
+        if (ImGui::BeginTable("##pinyin-options", 2,
+                              ImGuiTableFlags_SizingStretchSame)) {
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("英文候选", &pinyin_.spellEnabled);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("符号候选", &pinyin_.symbolsEnabled);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("拆字候选", &pinyin_.chaiziEnabled);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("扩展 B 区汉字", &pinyin_.extBEnabled);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("词语预测", &pinyin_.predictionEnabled);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("预编辑显示完整拼音",
+                            &pinyin_.pinyinInPreedit);
+            ImGui::EndTable();
+        }
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
         ImGui::TextUnformatted("功能开关");
         if (ImGui::Button("中文标点")) {
             tray_.server.toggleAddon("punctuation");
@@ -769,7 +795,40 @@ void SettingsWindow::drawUi() {
         ImGui::Checkbox("启用剪贴板同步", &sync_.enabled);
         ImGui::TextDisabled(
             "使用 SyncClipboard HTTP 协议同步文本；密码用 Windows DPAPI 保存。");
-        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
+
+        ImGui::TextUnformatted("最近复制");
+        ImGui::BeginChild("##clipboard-history",
+                          ImVec2(0, 160.0f * scale), true);
+        const auto history = tray_.server.clipboardSync().history();
+        if (history.empty()) {
+            ImGui::TextDisabled("暂无历史");
+        }
+        for (size_t i = 0; i < history.size(); ++i) {
+            std::string display = toUtf8(history[i].text);
+            std::replace(display.begin(), display.end(), '\n', ' ');
+            std::replace(display.begin(), display.end(), '\r', ' ');
+            if (display.size() > 100) {
+                display.resize(100);
+                display += "...";
+            }
+            display += "##history";
+            display += std::to_string(i);
+            if (ImGui::Selectable(display.c_str(), false,
+                                  ImGuiSelectableFlags_AllowDoubleClick) &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                tray_.server.clipboardSync().requestCopy(history[i].text);
+                status_ = L"已复制到剪贴板";
+            }
+        }
+        ImGui::EndChild();
+        if (ImGui::Button("清空历史")) {
+            tray_.server.clipboardSync().clearHistory();
+            status_ = L"剪贴板历史已清空";
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("双击条目复制");
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
 
         ImGui::TextUnformatted("服务器地址");
         ImGui::SetNextItemWidth(-1.0f);
@@ -803,7 +862,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.4.0");
+        ImGui::TextUnformatted("Tux IME 0.5.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
