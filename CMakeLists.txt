@@ -27,6 +27,10 @@ option(BUILD_SPELL_DICT "" OFF)
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
     set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/prefix")
 endif()
+# The upstream CI installs with DESTDIR and expects a drive-root prefix.
+if(DEFINED ENV{CI} AND CMAKE_INSTALL_PREFIX MATCHES "Program Files")
+    set(CMAKE_INSTALL_PREFIX "C:/" CACHE PATH "" FORCE)
+endif()
 # Fcitx on Windows resolves its data directory relative to the executable:
 # <prefix>/bin, <prefix>/lib/fcitx5, <prefix>/data/fcitx5.
 set(CMAKE_INSTALL_BINDIR "bin")
@@ -49,11 +53,9 @@ add_subdirectory(src)
 
 add_executable(tux-ime-test tools/tux-ime-test.cpp)
 target_link_libraries(tux-ime-test Fcitx5::Core)
-install(TARGETS tux-ime-test DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 add_executable(tux-client-test tools/tux-client-test.cpp)
 target_include_directories(tux-client-test PRIVATE "${CMAKE_SOURCE_DIR}")
-install(TARGETS tux-client-test DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 add_executable(sync-test tools/sync-test.cpp src/clipboard_sync.cpp)
 target_include_directories(sync-test PRIVATE "${CMAKE_SOURCE_DIR}")

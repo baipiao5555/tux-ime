@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.27)
 
+option(TUX_USE_MSVC "Build the TSF frontend with MSVC" OFF)
+if(NOT TUX_USE_MSVC)
+    set(CMAKE_C_COMPILER clang)
+    set(CMAKE_CXX_COMPILER clang++)
+endif()
+
 project(fcitx5-win32 VERSION 0.1.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

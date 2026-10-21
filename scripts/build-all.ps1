@@ -86,7 +86,8 @@ Invoke-Step "fcitx5-chinese-addons" {
 if (-not $SkipWin32) {
     Invoke-Step "TSF frontend" {
         & cmake @("-B", (Join-Path $BuildRoot "win32"), "-G", "Ninja",
-            "-S", (Join-Path $root "win32"), "-DCMAKE_BUILD_TYPE=Release")
+            "-S", (Join-Path $root "win32"), "-DCMAKE_BUILD_TYPE=Release",
+            "-DTUX_USE_MSVC=ON")
         cmake --build (Join-Path $BuildRoot "win32")
     }
 }
