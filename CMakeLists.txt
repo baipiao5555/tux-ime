@@ -58,10 +58,16 @@ add_executable(tux-client-test tools/tux-client-test.cpp)
 target_include_directories(tux-client-test PRIVATE "${CMAKE_SOURCE_DIR}")
 
 add_executable(sync-test tools/sync-test.cpp src/clipboard_sync.cpp
-    src/settings.cpp)
+    src/settings.cpp src/clipboard_image.cpp)
 target_include_directories(sync-test PRIVATE "${CMAKE_SOURCE_DIR}")
-target_link_libraries(sync-test winhttp bcrypt ws2_32 crypt32 shell32)
+target_link_libraries(sync-test winhttp bcrypt ws2_32 crypt32 shell32
+    ole32 gdiplus)
 
 add_executable(settings-test tools/settings-test.cpp src/settings.cpp)
 target_include_directories(settings-test PRIVATE "${CMAKE_SOURCE_DIR}")
 target_link_libraries(settings-test shell32 crypt32)
+
+add_executable(image-clipboard-test tools/image-clipboard-test.cpp
+    src/clipboard_image.cpp)
+target_include_directories(image-clipboard-test PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(image-clipboard-test gdiplus ole32 crypt32)

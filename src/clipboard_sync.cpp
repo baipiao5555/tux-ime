@@ -16,6 +16,8 @@
 #include <bcrypt.h>
 #include <winhttp.h>
 
+#include "clipboard_image.h"
+
 namespace tuxime {
 
 namespace {
@@ -46,8 +48,7 @@ std::string toUtf8(const std::wstring &text) {
     return result;
 }
 
-std::wstring sha256Hex(const std::wstring &text) {
-    const std::string utf8 = toUtf8(text);
+std::wstring sha256HexBytes(const uint8_t *data, size_t size) {
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
     DWORD objectSize = 0;
@@ -69,10 +70,8 @@ std::wstring sha256Hex(const std::wstring &text) {
     std::vector<uint8_t> digest(hashSize);
     if (BCryptCreateHash(algorithm, &hash, object.data(), objectSize,
                          nullptr, 0, 0) >= 0) {
-        BCryptHashData(hash,
-                       reinterpret_cast<PUCHAR>(
-                           const_cast<char *>(utf8.data())),
-                       static_cast<ULONG>(utf8.size()), 0);
+        BCryptHashData(hash, const_cast<PUCHAR>(data),
+                       static_cast<ULONG>(size), 0);
         if (BCryptFinishHash(hash, digest.data(), hashSize, 0) >= 0) {
             static const wchar_t hex[] = L"0123456789ABCDEF";
             result.reserve(hashSize * 2);
@@ -87,6 +86,20 @@ std::wstring sha256Hex(const std::wstring &text) {
     }
     BCryptCloseAlgorithmProvider(algorithm, 0);
     return result;
+}
+
+std::wstring sha256Hex(const std::wstring &text) {
+    const std::string utf8 = toUtf8(text);
+    return sha256HexBytes(
+        reinterpret_cast<const uint8_t *>(utf8.data()), utf8.size());
+}
+
+std::wstring fileHash(const std::wstring &name,
+                      const std::vector<uint8_t> &data) {
+    const std::wstring contentHash = sha256HexBytes(data.data(), data.size());
+    const std::string combined = toUtf8(name) + "|" + toUtf8(contentHash);
+    return sha256HexBytes(
+        reinterpret_cast<const uint8_t *>(combined.data()), combined.size());
 }
 
 std::string base64Encode(const std::string &data) {
@@ -321,6 +334,68 @@ std::string jsonUrl(std::string url) {
     return url + "/SyncClipboard.json";
 }
 
+std::string baseUrl(std::string url) {
+    while (!url.empty() && url.back() == '/') {
+        url.pop_back();
+    }
+    const std::string lower =
+        [](std::string value) {
+            std::transform(value.begin(), value.end(), value.begin(),
+                           [](unsigned char c) {
+                               return std::tolower(c);
+                           });
+            return value;
+        }(url);
+    if (lower.ends_with("/syncclipboard.json")) {
+        return url.substr(0, url.size() - std::string("SyncClipboard.json").size());
+    }
+    return url + "/";
+}
+
+std::string fileUrl(const std::string &serverUrl, const std::string &name) {
+    return baseUrl(serverUrl) + "file/" + name;
+}
+
+std::string sanitizeFileName(std::string name) {
+    const auto slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) {
+        name = name.substr(slash + 1);
+    }
+    for (char &c : name) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' &&
+            c != '_' && c != '-') {
+            c = '_';
+        }
+    }
+    if (name.empty() || name == "." || name == "..") {
+        return {};
+    }
+    return name;
+}
+
+bool jsonBool(const std::string &json, const std::string &key) {
+    const std::string needle = "\"" + key + "\"";
+    const auto pos = json.find(needle);
+    if (pos == std::string::npos) {
+        return false;
+    }
+    const auto colon = json.find(':', pos + needle.size());
+    if (colon == std::string::npos) {
+        return false;
+    }
+    const auto value = json.find_first_not_of(" \t\r\n", colon + 1);
+    return value != std::string::npos && json.compare(value, 4, "true") == 0;
+}
+
+bool isImageFileName(const std::string &name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return lower.ends_with(".png") || lower.ends_with(".jpg") ||
+           lower.ends_with(".jpeg") || lower.ends_with(".bmp") ||
+           lower.ends_with(".gif");
+}
+
 bool isPrivateAddress(const sockaddr *address) {
     if (address->sa_family == AF_INET) {
         const auto *v4 = reinterpret_cast<const sockaddr_in *>(address);
@@ -440,7 +515,8 @@ HttpResponse performRequest(const std::string &method,
                             const std::string &url,
                             const std::string &body,
                             const std::string &etag,
-                            const SyncConfig &config) {
+                            const SyncConfig &config,
+                            const std::string &contentType = {}) {
     HttpResponse response;
     std::wstring validationError;
     if (!validateSyncUrl(url, validationError)) {
@@ -506,7 +582,9 @@ HttpResponse performRequest(const std::string &method,
     std::wstring headers;
     headers += L"User-Agent: TuxIME/0.1\r\n";
     if (method == "PUT") {
-        headers += L"Content-Type: application/json\r\n";
+        const std::string type =
+            contentType.empty() ? "application/json" : contentType;
+        headers += L"Content-Type: " + toWide(type) + L"\r\n";
     }
     if (!etag.empty()) {
         headers += L"If-None-Match: " + toWide(etag) + L"\r\n";
@@ -814,8 +892,70 @@ bool ClipboardSync::pushText(const std::wstring &text) {
     return true;
 }
 
+bool ClipboardSync::pushImage(const std::vector<uint8_t> &png) {
+    const SyncConfig current = config();
+    if (!current.enabled || png.empty()) {
+        return false;
+    }
+    const std::wstring contentHash = sha256HexBytes(png.data(), png.size());
+    std::string name = "tuxime-" + toUtf8(contentHash).substr(0, 16) + ".png";
+    name = sanitizeFileName(name);
+    if (name.empty()) {
+        return false;
+    }
+    const std::wstring nameWide = toWide(name);
+    const std::wstring hash = fileHash(nameWide, png);
+    if (hash == lastHash_ || hash == lastAppliedHash_) {
+        return false;
+    }
+
+    const std::string fileEndpoint = fileUrl(current.serverUrl, name);
+    const HttpResponse upload = performRequest(
+        "PUT", fileEndpoint, std::string(png.begin(), png.end()), "", current,
+        "application/octet-stream");
+    if (!upload.error.empty()) {
+        report(upload.error);
+        return false;
+    }
+    if (upload.status < 200 || upload.status >= 300) {
+        report(L"图片上传失败：HTTP " + std::to_wstring(upload.status));
+        return false;
+    }
+
+    const std::string payload =
+        "{\"type\":\"File\",\"text\":\"" + jsonEscape(name) +
+        "\",\"hash\":\"" + toUtf8(hash) +
+        "\",\"hasData\":true,\"dataName\":\"" + jsonEscape(name) +
+        "\",\"size\":" + std::to_string(png.size()) + "}";
+    const HttpResponse response =
+        performRequest("PUT", jsonUrl(current.serverUrl), payload, "",
+                       current);
+    if (!response.error.empty()) {
+        report(response.error);
+        return false;
+    }
+    if (response.status < 200 || response.status >= 300) {
+        report(L"服务器返回 HTTP " + std::to_wstring(response.status));
+        return false;
+    }
+    lastHash_ = hash;
+    report(L"图片已同步到服务器");
+    return true;
+}
+
+void ClipboardSync::syncImage(const std::vector<uint8_t> &png) {
+    pushImage(png);
+}
+
 void ClipboardSync::onClipboardUpdate() {
     const SyncConfig current = config();
+    if (clipboardHasImage()) {
+        std::vector<uint8_t> png;
+        if (readClipboardImage(hwnd_, png) && !png.empty()) {
+            syncImage(png);
+            return;
+        }
+    }
     const std::wstring text = readClipboardText();
     if (text.empty()) {
         return;
@@ -855,21 +995,62 @@ void ClipboardSync::poll() {
     std::string type;
     std::string textUtf8;
     std::string hashUtf8;
-    if (!jsonString(response.body, "type", type) ||
-        type != "Text" ||
-        !jsonString(response.body, "text", textUtf8)) {
-        return;
-    }
+    jsonString(response.body, "type", type);
     jsonString(response.body, "hash", hashUtf8);
-    const std::wstring text = toWide(textUtf8);
-    const std::wstring hash =
-        hashUtf8.empty() ? sha256Hex(text) : toWide(hashUtf8);
-    if (hash == lastHash_ || hash == lastAppliedHash_) {
+    if (type == "Text" && jsonString(response.body, "text", textUtf8)) {
+        const std::wstring text = toWide(textUtf8);
+        const std::wstring hash =
+            hashUtf8.empty() ? sha256Hex(text) : toWide(hashUtf8);
+        if (hash == lastHash_ || hash == lastAppliedHash_) {
+            return;
+        }
+        lastHash_ = hash;
+        setClipboardText(text);
+        report(L"收到远端剪贴板");
         return;
     }
-    lastHash_ = hash;
-    setClipboardText(text);
-    report(L"收到远端剪贴板");
+
+    if (type != "File" && type != "Image") {
+        return;
+    }
+    std::string dataName;
+    if (!jsonBool(response.body, "hasData") ||
+        !jsonString(response.body, "dataName", dataName)) {
+        return;
+    }
+    dataName = sanitizeFileName(dataName);
+    if (dataName.empty()) {
+        return;
+    }
+    const std::wstring hash = toWide(hashUtf8);
+    if (!hash.empty() &&
+        (hash == lastHash_ || hash == lastAppliedHash_)) {
+        return;
+    }
+    const HttpResponse file = performRequest(
+        "GET", fileUrl(current.serverUrl, dataName), "", "", current);
+    if (!file.error.empty()) {
+        report(file.error);
+        return;
+    }
+    if (file.status < 200 || file.status >= 300) {
+        report(L"文件下载失败：HTTP " + std::to_wstring(file.status));
+        return;
+    }
+    if (!isImageFileName(dataName)) {
+        report(L"收到文件，当前版本只支持图片同步");
+        return;
+    }
+    const std::vector<uint8_t> image(file.body.begin(), file.body.end());
+    if (!writeClipboardImage(hwnd_, image)) {
+        report(L"图片写入剪贴板失败");
+        return;
+    }
+    if (!hash.empty()) {
+        lastHash_ = hash;
+        lastAppliedHash_ = hash;
+    }
+    report(L"收到远端图片");
 }
 
 void ClipboardSync::run() {

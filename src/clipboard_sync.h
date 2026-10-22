@@ -44,6 +44,8 @@ private:
     void onClipboardUpdate();
     void poll();
     bool pushText(const std::wstring &text);
+    bool pushImage(const std::vector<uint8_t> &png);
+    void syncImage(const std::vector<uint8_t> &png);
     void setClipboardText(const std::wstring &text);
     std::wstring readClipboardText() const;
     void report(const std::wstring &status);

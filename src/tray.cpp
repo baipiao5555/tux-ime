@@ -803,7 +803,7 @@ void SettingsWindow::drawUi() {
         ImGui::Dummy(ImVec2(0, 4.0f * scale));
         ImGui::Checkbox("启用剪贴板同步", &sync_.enabled);
         ImGui::TextDisabled(
-            "使用 SyncClipboard HTTP 协议同步文本；密码用 Windows DPAPI 保存。");
+            "使用 SyncClipboard HTTP 协议同步文本和图片；密码用 Windows DPAPI 保存。");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
 
         ImGui::TextUnformatted("最近复制");
@@ -955,7 +955,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.7.0");
+        ImGui::TextUnformatted("Tux IME 0.8.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
