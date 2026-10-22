@@ -166,6 +166,21 @@ if (Test-Path (Join-Path $win32x86Dir "tuxime-x86.dll")) {
 }
 Copy-Item (Join-Path $root "README.md") $dist
 
+# The upstream table input-method configs contain the absolute build-tree
+# dictionary path. Rewrite them to a path relative to Fcitx's package data
+# directory so 五笔/仓颉/etc. work after installation on another machine.
+$inputMethodDir = Join-Path $dist "data/fcitx5/inputmethod"
+$prefixData = (($Prefix -replace '\\', '/').TrimEnd('/')) + "/data/libime/"
+Get-ChildItem $inputMethodDir -Filter *.conf -File | ForEach-Object {
+    $text = [IO.File]::ReadAllText($_.FullName,
+        [Text.Encoding]::UTF8)
+    if ($text.Contains($prefixData)) {
+        $text = $text.Replace($prefixData, "libime/")
+        [IO.File]::WriteAllText($_.FullName, $text,
+            (New-Object System.Text.UTF8Encoding($false)))
+    }
+}
+
 # Remove development-only executables from the distribution.
 Get-ChildItem (Join-Path $dist "bin") -File | Where-Object {
     ($_.Name -match '^(Fcitx5|fcitx5-|libime_|tux-client-test|tux-ime-test|server-client-test|candidate-test)' -and
