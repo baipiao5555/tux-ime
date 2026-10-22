@@ -1353,6 +1353,14 @@ void SettingsWindow::drawUi() {
         ImGui::TextUnformatted(
             "项目地址：https://github.com/baipiao5555/tux-ime");
         ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        if (ImGui::Button("打开日志目录")) {
+            const std::wstring directory =
+                SettingsStore::appDataDir().wstring();
+            ShellExecuteW(nullptr, L"open", directory.c_str(), nullptr,
+                          nullptr, SW_SHOWNORMAL);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("tuxime.log");
         if (ImGui::Button("检查更新")) {
             const auto result = tuxime::checkLatestRelease();
             if (!result.ok) {
