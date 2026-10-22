@@ -1,10 +1,34 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 #include "../src/clipboard_sync.h"
 
-int main() {
+namespace {
+std::string toUtf8(const std::wstring &text) {
+    const int size = WideCharToMultiByte(
+        CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0,
+        nullptr, nullptr);
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(),
+                        static_cast<int>(text.size()), result.data(), size,
+                        nullptr, nullptr);
+    return result;
+}
+} // namespace
+
+int main(int argc, char **argv) {
+    if (argc > 1) {
+        tuxime::ClipboardSync sync;
+        tuxime::SyncConfig config;
+        config.serverUrl = argv[1];
+        config.username = argc > 2 ? argv[2] : "";
+        config.password = argc > 3 ? argv[3] : "";
+        const std::wstring status = sync.testConnection(config);
+        std::printf("%s\n", toUtf8(status).c_str());
+        return 0;
+    }
     struct Case {
         const char *url;
         bool expected;

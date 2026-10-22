@@ -396,6 +396,23 @@ bool isImageFileName(const std::string &name) {
            lower.ends_with(".gif");
 }
 
+std::wstring httpStatusMessage(int status) {
+    switch (status) {
+    case 401:
+        return L"认证失败：服务器拒绝了用户名或密码。WebDAV 可能需要单独的应用密码，"
+               L"并请确认地址填到了具体工作目录。";
+    case 403:
+        return L"没有权限：请检查 WebDAV 账号权限和工作目录。";
+    case 404:
+        return L"路径不存在：WebDAV 地址需要填写到已存在的工作目录，"
+               L"不要只填域名根目录。";
+    case 405:
+        return L"服务器不接受该请求：请确认地址是 SyncClipboard 或 WebDAV 工作目录。";
+    default:
+        return L"服务器返回 HTTP " + std::to_wstring(status);
+    }
+}
+
 bool isPrivateAddress(const sockaddr *address) {
     if (address->sa_family == AF_INET) {
         const auto *v4 = reinterpret_cast<const sockaddr_in *>(address);
@@ -884,7 +901,7 @@ bool ClipboardSync::pushText(const std::wstring &text) {
         return false;
     }
     if (response.status < 200 || response.status >= 300) {
-        report(L"服务器返回 HTTP " + std::to_wstring(response.status));
+        report(httpStatusMessage(response.status));
         return false;
     }
     lastHash_ = hash;
@@ -910,15 +927,23 @@ bool ClipboardSync::pushImage(const std::vector<uint8_t> &png) {
     }
 
     const std::string fileEndpoint = fileUrl(current.serverUrl, name);
-    const HttpResponse upload = performRequest(
-        "PUT", fileEndpoint, std::string(png.begin(), png.end()), "", current,
-        "application/octet-stream");
+    const std::string fileBody(png.begin(), png.end());
+    auto uploadFile = [&]() {
+        return performRequest("PUT", fileEndpoint, fileBody, "", current,
+                              "application/octet-stream");
+    };
+    HttpResponse upload = uploadFile();
+    if (upload.status == 404 || upload.status == 409) {
+        performRequest("MKCOL", baseUrl(current.serverUrl) + "file/", "",
+                       "", current);
+        upload = uploadFile();
+    }
     if (!upload.error.empty()) {
         report(upload.error);
         return false;
     }
     if (upload.status < 200 || upload.status >= 300) {
-        report(L"图片上传失败：HTTP " + std::to_wstring(upload.status));
+        report(httpStatusMessage(upload.status));
         return false;
     }
 
@@ -935,7 +960,7 @@ bool ClipboardSync::pushImage(const std::vector<uint8_t> &png) {
         return false;
     }
     if (response.status < 200 || response.status >= 300) {
-        report(L"服务器返回 HTTP " + std::to_wstring(response.status));
+        report(httpStatusMessage(response.status));
         return false;
     }
     lastHash_ = hash;
@@ -987,7 +1012,7 @@ void ClipboardSync::poll() {
         return;
     }
     if (response.status < 200 || response.status >= 300) {
-        report(L"服务器返回 HTTP " + std::to_wstring(response.status));
+        report(httpStatusMessage(response.status));
         return;
     }
     lastEtag_ = response.etag;
@@ -1034,7 +1059,7 @@ void ClipboardSync::poll() {
         return;
     }
     if (file.status < 200 || file.status >= 300) {
-        report(L"文件下载失败：HTTP " + std::to_wstring(file.status));
+        report(httpStatusMessage(file.status));
         return;
     }
     if (!isImageFileName(dataName)) {
@@ -1145,7 +1170,7 @@ std::wstring ClipboardSync::testConnection(const SyncConfig &config) const {
     if (response.status >= 200 && response.status < 300) {
         return L"连接成功。";
     }
-    return L"服务器返回 HTTP " + std::to_wstring(response.status);
+    return httpStatusMessage(response.status);
 }
 
 } // namespace tuxime

@@ -845,6 +845,9 @@ void SettingsWindow::drawUi() {
                                  url_, sizeof(url_));
         ImGui::TextDisabled(
             "只允许 http/https，拒绝本机、环回、私有和保留地址。");
+        ImGui::TextDisabled(
+            "WebDAV 请填写到具体工作目录，例如 https://host/dav/clipboard；"
+            "不要只填域名根目录。");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
 
         ImGui::TextUnformatted("用户名");
@@ -955,7 +958,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.9.2");
+        ImGui::TextUnformatted("Tux IME 0.9.3");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
