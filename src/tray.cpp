@@ -206,6 +206,44 @@ bool runHiddenProcess(const std::wstring &commandLine, DWORD timeoutMs) {
     return wait == WAIT_OBJECT_0 && exitCode == 0;
 }
 
+bool readRegistryString(HKEY root, const wchar_t *subKey, REGSAM view,
+                        const wchar_t *name, std::wstring &value) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ | view, &key) !=
+        ERROR_SUCCESS) {
+        return false;
+    }
+    DWORD type = 0;
+    DWORD size = 0;
+    if (RegQueryValueExW(key, name, nullptr, &type, nullptr, &size) !=
+            ERROR_SUCCESS ||
+        (type != REG_SZ && type != REG_EXPAND_SZ) || size == 0) {
+        RegCloseKey(key);
+        return false;
+    }
+    std::vector<wchar_t> buffer(size / sizeof(wchar_t) + 1);
+    const auto result = RegQueryValueExW(
+        key, name, nullptr, &type,
+        reinterpret_cast<BYTE *>(buffer.data()), &size);
+    RegCloseKey(key);
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+    value.assign(buffer.data());
+    return true;
+}
+
+bool registryValueExists(HKEY root, const wchar_t *subKey, const wchar_t *name) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subKey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+        return false;
+    }
+    const auto result = RegQueryValueExW(key, name, nullptr, nullptr, nullptr,
+                                          nullptr);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS;
+}
+
 int windowDpi(HWND hwnd) {
     using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
     static auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
@@ -254,6 +292,12 @@ struct UpdateTaskState {
     std::wstring error;
 };
 
+struct DiagnosticItem {
+    std::wstring label;
+    std::wstring detail;
+    bool ok = false;
+};
+
 class SettingsWindow {
 public:
     explicit SettingsWindow(TrayIcon::Impl &tray) : tray_(tray) {}
@@ -272,6 +316,7 @@ private:
     void apply();
     void test();
     void syncNow();
+    void runDiagnostics();
     void render();
     void hide();
 
@@ -304,6 +349,8 @@ private:
     std::wstring updateAssetUrl_;
     std::shared_ptr<UpdateTaskState> updateTask_ =
         std::make_shared<UpdateTaskState>();
+    std::vector<DiagnosticItem> diagnostics_;
+    bool diagnosticsRun_ = false;
 };
 
 void TrayIcon::Impl::run() {
@@ -769,6 +816,69 @@ void SettingsWindow::syncNow() {
     status_ = L"已请求同步";
 }
 
+void SettingsWindow::runDiagnostics() {
+    diagnostics_.clear();
+    auto add = [this](const wchar_t *label, bool ok,
+                      const std::wstring &detail) {
+        diagnostics_.push_back({label, detail, ok});
+    };
+
+    constexpr wchar_t clsidKey[] =
+        L"SOFTWARE\\Classes\\CLSID\\{8D7031FD-4D2D-4CCE-BB41-05F54D7AC612}"
+        L"\\InprocServer32";
+    constexpr wchar_t tip[] =
+        L"0804:{8D7031FD-4D2D-4CCE-BB41-05F54D7AC612}"
+        L"{76AE52E2-7F68-4A6D-81D0-A48D4AC73E36}";
+    constexpr wchar_t languageKey[] =
+        L"Control Panel\\International\\User Profile\\zh-Hans-CN";
+
+    std::wstring dll64;
+    const bool reg64 =
+        readRegistryString(HKEY_LOCAL_MACHINE, clsidKey, KEY_WOW64_64KEY,
+                           nullptr, dll64) &&
+        std::filesystem::exists(std::filesystem::path(dll64));
+    add(L"64 位 TSF 注册", reg64,
+        reg64 ? dll64 : L"未注册或文件不存在");
+
+    std::wstring dll32;
+    const bool reg32 =
+        readRegistryString(HKEY_LOCAL_MACHINE, clsidKey, KEY_WOW64_32KEY,
+                           nullptr, dll32) &&
+        std::filesystem::exists(std::filesystem::path(dll32));
+    add(L"32 位 TSF 注册", reg32,
+        reg32 ? dll32 : L"未注册或文件不存在");
+
+    const bool language =
+        registryValueExists(HKEY_CURRENT_USER, languageKey, tip);
+    add(L"简体中文键盘列表", language,
+        language ? L"已包含 Tux IME" : L"未加入，请重新运行安装器");
+
+    const SyncConfig sync = SettingsStore::loadSync();
+    const bool syncOk = sync.enabled && !sync.serverUrl.empty();
+    add(L"剪贴板同步", syncOk,
+        syncOk ? toWide(sync.serverUrl) : L"未启用或未填写服务器地址");
+
+    const auto bin = moduleDirectory();
+    const auto data = bin.parent_path() / "data";
+    const bool dictOk =
+        std::filesystem::exists(data / "libime" / "sc.dict");
+    add(L"拼音词典数据", dictOk,
+        dictOk ? (data / "libime" / "sc.dict").wstring()
+               : L"缺少 data/libime/sc.dict");
+
+    const bool toolOk =
+        std::filesystem::exists(bin / "libime_pinyindict.exe");
+    add(L"用户词典工具", toolOk,
+        toolOk ? (bin / "libime_pinyindict.exe").wstring()
+               : L"缺少 libime_pinyindict.exe");
+
+    const auto logPath = SettingsStore::appDataDir() / "tuxime.log";
+    const bool logOk = std::filesystem::exists(logPath);
+    add(L"服务日志", logOk,
+        logOk ? logPath.wstring() : L"日志尚未生成");
+    diagnosticsRun_ = true;
+}
+
 void SettingsWindow::drawUi() {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -802,8 +912,8 @@ void SettingsWindow::drawUi() {
     ImGui::BeginChild("##nav", ImVec2(180.0f * scale, 0), false);
     ImGui::Dummy(ImVec2(0, 10.0f * scale));
     const char *tabs[] = {"输入法", "剪贴板", "短语", "词典", "外观",
-                          "关于"};
-    for (int i = 0; i < 6; ++i) {
+                          "诊断", "关于"};
+    for (int i = 0; i < 7; ++i) {
         const bool selected = page_ == i;
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Header,
@@ -1339,6 +1449,34 @@ void SettingsWindow::drawUi() {
                     status_ = L"主题已导入";
                 }
             }
+        }
+    } else if (page_ == 5) {
+        if (!diagnosticsRun_) {
+            runDiagnostics();
+        }
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "诊断");
+        ImGui::Separator();
+        ImGui::TextDisabled("检查 TSF 注册、语言列表、同步和运行数据。");
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
+        if (ImGui::Button("重新检测")) {
+            runDiagnostics();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("打开日志目录")) {
+            const std::wstring directory =
+                SettingsStore::appDataDir().wstring();
+            ShellExecuteW(nullptr, L"open", directory.c_str(), nullptr,
+                          nullptr, SW_SHOWNORMAL);
+        }
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        for (const auto &item : diagnostics_) {
+            ImGui::TextColored(
+                item.ok ? ImVec4(0.12f, 0.55f, 0.24f, 1.0f)
+                        : ImVec4(0.78f, 0.20f, 0.18f, 1.0f),
+                "%s", item.ok ? "正常" : "异常");
+            ImGui::SameLine();
+            ImGui::TextUnformatted(toUtf8(item.label).c_str());
+            ImGui::TextWrapped("%s", toUtf8(item.detail).c_str());
         }
     } else {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
