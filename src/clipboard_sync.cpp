@@ -9,11 +9,14 @@
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <vector>
 
 #include <bcrypt.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include <winhttp.h>
 
 #include "clipboard_image.h"
@@ -420,6 +423,112 @@ bool isImageFileName(const std::string &name) {
     return lower.ends_with(".png") || lower.ends_with(".jpg") ||
            lower.ends_with(".jpeg") || lower.ends_with(".bmp") ||
            lower.ends_with(".gif");
+}
+
+constexpr size_t kMaxSyncFileSize = 50 * 1024 * 1024;
+
+std::vector<std::wstring> readClipboardFiles(HWND owner) {
+    std::vector<std::wstring> files;
+    if (!IsClipboardFormatAvailable(CF_HDROP) || !OpenClipboard(owner)) {
+        return files;
+    }
+    HDROP drop = static_cast<HDROP>(GetClipboardData(CF_HDROP));
+    if (drop) {
+        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        for (UINT i = 0; i < count; ++i) {
+            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+            if (length == 0) {
+                continue;
+            }
+            std::wstring path(length + 1, L'\0');
+            DragQueryFileW(drop, i, path.data(), length + 1);
+            path.resize(length);
+            files.push_back(std::move(path));
+        }
+    }
+    CloseClipboard();
+    return files;
+}
+
+bool writeClipboardFile(HWND owner, const std::wstring &path) {
+    if (!OpenClipboard(owner)) {
+        return false;
+    }
+    EmptyClipboard();
+    bool success = false;
+    const size_t pathBytes = (path.size() + 2) * sizeof(wchar_t);
+    const size_t totalBytes = sizeof(DROPFILES) + pathBytes;
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, totalBytes);
+    if (memory) {
+        auto *drop = static_cast<DROPFILES *>(GlobalLock(memory));
+        if (drop) {
+            drop->pFiles = sizeof(DROPFILES);
+            drop->fWide = TRUE;
+            auto *destination = reinterpret_cast<wchar_t *>(
+                reinterpret_cast<BYTE *>(drop) + sizeof(DROPFILES));
+            std::memcpy(destination, path.c_str(),
+                        (path.size() + 1) * sizeof(wchar_t));
+            destination[path.size() + 1] = L'\0';
+            GlobalUnlock(memory);
+            success = SetClipboardData(CF_HDROP, memory) != nullptr;
+            if (success) {
+                memory = nullptr;
+            }
+        }
+    }
+    if (memory) {
+        GlobalFree(memory);
+    }
+    CloseClipboard();
+    return success;
+}
+
+bool readFileBytes(const std::wstring &path, std::vector<uint8_t> &data) {
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
+    if (!in) {
+        return false;
+    }
+    in.seekg(0, std::ios::end);
+    const auto size = in.tellg();
+    if (size < 0 || static_cast<uint64_t>(size) > kMaxSyncFileSize) {
+        return false;
+    }
+    data.resize(static_cast<size_t>(size));
+    in.seekg(0, std::ios::beg);
+    if (!data.empty()) {
+        in.read(reinterpret_cast<char *>(data.data()),
+                static_cast<std::streamsize>(data.size()));
+    }
+    return in.good() || in.eof();
+}
+
+bool writeTempFile(const std::string &name, const std::vector<uint8_t> &data,
+                   std::wstring &path) {
+    wchar_t temp[MAX_PATH] = {};
+    if (GetTempPathW(MAX_PATH, temp) == 0) {
+        return false;
+    }
+    const auto directory =
+        std::filesystem::path(temp) / "TuxIME" / "sync";
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (error) {
+        return false;
+    }
+    const auto file = directory / std::filesystem::path(toWide(name));
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return false;
+    }
+    if (!data.empty()) {
+        out.write(reinterpret_cast<const char *>(data.data()),
+                  static_cast<std::streamsize>(data.size()));
+    }
+    if (!out) {
+        return false;
+    }
+    path = file.wstring();
+    return true;
 }
 
 std::wstring httpStatusMessage(int status) {
@@ -946,14 +1055,24 @@ bool ClipboardSync::pushImage(const std::vector<uint8_t> &png) {
     if (name.empty()) {
         return false;
     }
-    const std::wstring nameWide = toWide(name);
-    const std::wstring hash = fileHash(nameWide, png);
+    return pushFile(toWide(name), png);
+}
+
+bool ClipboardSync::pushFile(const std::wstring &name,
+                             const std::vector<uint8_t> &data) {
+    const SyncConfig current = config();
+    const std::string nameUtf8 = sanitizeFileName(toUtf8(name));
+    if (!current.enabled || data.empty() || nameUtf8.empty() ||
+        data.size() > kMaxSyncFileSize) {
+        return false;
+    }
+    const std::wstring hash = fileHash(toWide(nameUtf8), data);
     if (hash == lastHash_ || hash == lastAppliedHash_) {
         return false;
     }
 
-    const std::string fileEndpoint = fileUrl(current.serverUrl, name);
-    const std::string fileBody(png.begin(), png.end());
+    const std::string fileEndpoint = fileUrl(current.serverUrl, nameUtf8);
+    const std::string fileBody(data.begin(), data.end());
     auto uploadFile = [&]() {
         return performRequest("PUT", fileEndpoint, fileBody, "", current,
                               "application/octet-stream");
@@ -974,10 +1093,10 @@ bool ClipboardSync::pushImage(const std::vector<uint8_t> &png) {
     }
 
     const std::string payload =
-        "{\"type\":\"File\",\"text\":\"" + jsonEscape(name) +
+        "{\"type\":\"File\",\"text\":\"" + jsonEscape(nameUtf8) +
         "\",\"hash\":\"" + toUtf8(hash) +
-        "\",\"hasData\":true,\"dataName\":\"" + jsonEscape(name) +
-        "\",\"size\":" + std::to_string(png.size()) + "}";
+        "\",\"hasData\":true,\"dataName\":\"" + jsonEscape(nameUtf8) +
+        "\",\"size\":" + std::to_string(data.size()) + "}";
     const HttpResponse response =
         performRequest("PUT", jsonUrl(current.serverUrl), payload, "",
                        current);
@@ -990,7 +1109,7 @@ bool ClipboardSync::pushImage(const std::vector<uint8_t> &png) {
         return false;
     }
     lastHash_ = hash;
-    report(L"图片已同步到服务器");
+    report(L"文件已同步到服务器");
     return true;
 }
 
@@ -1006,6 +1125,15 @@ void ClipboardSync::onClipboardUpdate() {
             syncImage(png);
             return;
         }
+    }
+    const auto files = readClipboardFiles(hwnd_);
+    if (!files.empty()) {
+        std::vector<uint8_t> data;
+        if (readFileBytes(files.front(), data)) {
+            pushFile(std::filesystem::path(files.front()).filename().wstring(),
+                     data);
+        }
+        return;
     }
     const std::wstring text = readClipboardText();
     if (text.empty()) {
@@ -1088,18 +1216,31 @@ void ClipboardSync::poll() {
         report(httpStatusMessage(file.status));
         return;
     }
+    const std::vector<uint8_t> fileData(file.body.begin(), file.body.end());
     if (!isImageFileName(dataName)) {
-        report(L"收到文件，当前版本只支持图片同步");
-        return;
-    }
-    const std::vector<uint8_t> image(file.body.begin(), file.body.end());
-    if (!writeClipboardImage(hwnd_, image)) {
-        report(L"图片写入剪贴板失败");
+        std::wstring path;
+        if (!writeTempFile(dataName, fileData, path)) {
+            report(L"同步文件写入失败");
+            return;
+        }
+        if (!hash.empty()) {
+            lastHash_ = hash;
+            lastAppliedHash_ = hash;
+        }
+        if (!writeClipboardFile(hwnd_, path)) {
+            report(L"文件写入剪贴板失败");
+            return;
+        }
+        report(L"收到远端文件");
         return;
     }
     if (!hash.empty()) {
         lastHash_ = hash;
         lastAppliedHash_ = hash;
+    }
+    if (!writeClipboardImage(hwnd_, fileData)) {
+        report(L"图片写入剪贴板失败");
+        return;
     }
     report(L"收到远端图片");
 }

@@ -959,7 +959,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.12.1");
+        ImGui::TextUnformatted("Tux IME 0.13.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

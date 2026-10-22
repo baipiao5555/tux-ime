@@ -45,6 +45,7 @@ private:
     void poll();
     bool pushText(const std::wstring &text);
     bool pushImage(const std::vector<uint8_t> &png);
+    bool pushFile(const std::wstring &name, const std::vector<uint8_t> &data);
     void syncImage(const std::vector<uint8_t> &png);
     void setClipboardText(const std::wstring &text);
     std::wstring readClipboardText() const;
