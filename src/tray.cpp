@@ -6,11 +6,13 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
 #include <windows.h>
 #include <windowsx.h>
+#include <commdlg.h>
 
 #include <d3d11.h>
 #include <imgui.h>
@@ -101,6 +103,24 @@ void copyText(char *destination, size_t size, const std::string &text) {
     const size_t length = (std::min)(text.size(), size - 1);
     std::memcpy(destination, text.data(), length);
     destination[length] = '\0';
+}
+
+std::wstring chooseTextFile(bool save, const wchar_t *title) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = GetActiveWindow();
+    dialog.lpstrFilter =
+        L"文本文件 (*.txt)\0*.txt\0所有文件 (*.*)\0*.*\0";
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrTitle = title;
+    dialog.lpstrDefExt = L"txt";
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER |
+                   (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    const BOOL ok = save ? GetSaveFileNameW(&dialog)
+                         : GetOpenFileNameW(&dialog);
+    return ok ? std::wstring(path) : std::wstring();
 }
 
 int windowDpi(HWND hwnd) {
@@ -939,6 +959,64 @@ void SettingsWindow::drawUi() {
                 status_ = L"短语已删除";
             }
         }
+        ImGui::SameLine();
+        if (ImGui::Button("导入短语")) {
+            const std::wstring path =
+                chooseTextFile(false, L"导入自定义短语");
+            if (!path.empty()) {
+                std::ifstream in(std::filesystem::path(path),
+                                 std::ios::binary);
+                std::string line;
+                size_t imported = 0;
+                while (std::getline(in, line)) {
+                    if (!line.empty() && line.back() == '\r') {
+                        line.pop_back();
+                    }
+                    const auto tab = line.find('\t');
+                    if (tab == std::string::npos) {
+                        continue;
+                    }
+                    std::string code = line.substr(0, tab);
+                    const std::string text = line.substr(tab + 1);
+                    std::transform(code.begin(), code.end(), code.begin(),
+                                   [](unsigned char c) {
+                                       return static_cast<char>(
+                                           std::tolower(c));
+                                   });
+                    if (code.empty() || text.empty()) {
+                        continue;
+                    }
+                    const auto existing = std::find_if(
+                        phrases_.begin(), phrases_.end(),
+                        [&code](const CustomPhrase &phrase) {
+                            return phrase.code == code;
+                        });
+                    if (existing != phrases_.end()) {
+                        existing->text = text;
+                    } else {
+                        phrases_.push_back({code, text});
+                    }
+                    ++imported;
+                }
+                SettingsStore::savePhrases(phrases_);
+                tray_.server.applySettings(pinyin_, sync_);
+                status_ = L"已导入 " + std::to_wstring(imported) +
+                          L" 条短语";
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("导出短语")) {
+            const std::wstring path =
+                chooseTextFile(true, L"导出自定义短语");
+            if (!path.empty()) {
+                std::ofstream out(std::filesystem::path(path),
+                                  std::ios::binary | std::ios::trunc);
+                for (const auto &phrase : phrases_) {
+                    out << phrase.code << '\t' << phrase.text << '\n';
+                }
+                status_ = out ? L"短语已导出" : L"短语导出失败";
+            }
+        }
     } else if (page_ == 3) {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "外观");
         ImGui::Separator();
@@ -959,7 +1037,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.13.0");
+        ImGui::TextUnformatted("Tux IME 0.13.1");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

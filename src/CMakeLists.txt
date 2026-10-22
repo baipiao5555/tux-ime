@@ -26,5 +26,5 @@ add_executable(tuxime-server
 )
 target_include_directories(tuxime-server PRIVATE "${CMAKE_SOURCE_DIR}")
 target_link_libraries(tuxime-server Fcitx5::Core tuxime_imgui
-    winhttp bcrypt ws2_32 crypt32 shell32 ole32 gdiplus)
+    winhttp bcrypt ws2_32 crypt32 shell32 ole32 gdiplus comdlg32)
 install(TARGETS tuxime-server DESTINATION "${CMAKE_INSTALL_BINDIR}")
