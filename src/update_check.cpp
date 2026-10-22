@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cwctype>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -218,12 +220,259 @@ UpdateCheckResult checkLatestRelease() {
         return result;
     }
 
+    std::string asset;
+    const std::string assetKey = "\"browser_download_url\":\"";
+    size_t search = 0;
+    while ((search = body.find(assetKey, search)) != std::string::npos) {
+        const size_t begin = search + assetKey.size();
+        const size_t end = body.find('"', begin);
+        if (end == std::string::npos) {
+            break;
+        }
+        const std::string candidate = body.substr(begin, end - begin);
+        if (candidate.rfind("https://github.com/", 0) == 0 &&
+            candidate.find("TuxIME-Setup-") != std::string::npos &&
+            candidate.ends_with(".exe")) {
+            asset = candidate;
+            break;
+        }
+        search = end;
+    }
+
     const std::wstring latest = toWide(tag);
     result.version = latest;
     result.url = toWide(page);
+    result.assetUrl = toWide(asset);
     result.hasUpdate =
         isVersionNewer(latest, toWide(TUX_IME_VERSION));
     result.ok = true;
+    return result;
+}
+
+namespace {
+
+bool allowedDownloadHost(const std::wstring &host) {
+    return host == L"github.com" ||
+           host == L"objects.githubusercontent.com" ||
+           host == L"release-assets.githubusercontent.com";
+}
+
+std::wstring locationHeader(HINTERNET request) {
+    DWORD size = 0;
+    WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"Location",
+                        nullptr, &size, WINHTTP_NO_HEADER_INDEX);
+    if (size == 0) {
+        return {};
+    }
+    std::vector<wchar_t> buffer(size / sizeof(wchar_t) + 1);
+    if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"Location",
+                             buffer.data(), &size,
+                             WINHTTP_NO_HEADER_INDEX)) {
+        return {};
+    }
+    return buffer.data();
+}
+
+bool writeDownload(const std::wstring &url, const std::wstring &path,
+                   std::wstring &error) {
+    std::wstring current = url;
+    for (int redirect = 0; redirect < 6; ++redirect) {
+        URL_COMPONENTS components{};
+        components.dwStructSize = sizeof(components);
+        components.dwSchemeLength = static_cast<DWORD>(-1);
+        components.dwHostNameLength = static_cast<DWORD>(-1);
+        components.dwUrlPathLength = static_cast<DWORD>(-1);
+        components.dwExtraInfoLength = static_cast<DWORD>(-1);
+        if (!WinHttpCrackUrl(current.c_str(), 0, 0, &components) ||
+            components.nScheme != INTERNET_SCHEME_HTTPS) {
+            error = L"下载地址不是 HTTPS。";
+            return false;
+        }
+        const std::wstring host(components.lpszHostName,
+                                components.dwHostNameLength);
+        if (!allowedDownloadHost(host)) {
+            error = L"下载地址主机不在允许列表。";
+            return false;
+        }
+
+        std::wstring target(components.lpszUrlPath,
+                            components.dwUrlPathLength);
+        if (components.lpszExtraInfo && components.dwExtraInfoLength) {
+            target.append(components.lpszExtraInfo,
+                          components.dwExtraInfoLength);
+        }
+        if (target.empty()) {
+            target = L"/";
+        }
+
+        HINTERNET session = WinHttpOpen(
+            L"TuxIME/updater", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session) {
+            error = L"无法初始化下载网络。";
+            return false;
+        }
+        WinHttpSetTimeouts(session, 10000, 10000, 15000, 60000);
+        HINTERNET connection = WinHttpConnect(
+            session, host.c_str(),
+            components.nPort ? components.nPort : INTERNET_DEFAULT_HTTPS_PORT,
+            0);
+        if (!connection) {
+            WinHttpCloseHandle(session);
+            error = L"无法连接下载服务器。";
+            return false;
+        }
+        HINTERNET request = WinHttpOpenRequest(
+            connection, L"GET", target.c_str(), nullptr,
+            WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_SECURE);
+        if (!request) {
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            error = L"无法创建下载请求。";
+            return false;
+        }
+        DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+        WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY,
+                         &redirectPolicy, sizeof(redirectPolicy));
+        const wchar_t *headers =
+            L"User-Agent: TuxIME\r\nAccept: application/octet-stream\r\n";
+        if (!WinHttpSendRequest(request, headers, static_cast<DWORD>(-1L),
+                                WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+            !WinHttpReceiveResponse(request, nullptr)) {
+            error = L"下载请求失败。";
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            return false;
+        }
+        DWORD status = 0;
+        DWORD statusSize = sizeof(status);
+        WinHttpQueryHeaders(
+            request,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize,
+            WINHTTP_NO_HEADER_INDEX);
+        if (status == 301 || status == 302 || status == 303 ||
+            status == 307 || status == 308) {
+            const std::wstring location = locationHeader(request);
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            if (location.empty()) {
+                error = L"下载重定向缺少地址。";
+                return false;
+            }
+            current = location;
+            continue;
+        }
+        if (status != 200) {
+            error = L"下载失败，HTTP " + std::to_wstring(status) + L"。";
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            return false;
+        }
+
+        std::ofstream out(std::filesystem::path(path),
+                          std::ios::binary | std::ios::trunc);
+        if (!out) {
+            error = L"无法创建安装包文件。";
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            return false;
+        }
+        size_t total = 0;
+        for (;;) {
+            DWORD available = 0;
+            if (!WinHttpQueryDataAvailable(request, &available) ||
+                available == 0) {
+                break;
+            }
+            std::string chunk(available, '\0');
+            DWORD read = 0;
+            if (!WinHttpReadData(request, chunk.data(), available, &read) ||
+                read == 0) {
+                break;
+            }
+            total += read;
+            if (total > 200ull * 1024 * 1024) {
+                error = L"安装包超过 200 MB，已中止。";
+                out.close();
+                std::filesystem::remove(std::filesystem::path(path));
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connection);
+                WinHttpCloseHandle(session);
+                return false;
+            }
+            out.write(chunk.data(), read);
+        }
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connection);
+        WinHttpCloseHandle(session);
+        if (total == 0) {
+            error = L"下载内容为空。";
+            std::filesystem::remove(std::filesystem::path(path));
+            return false;
+        }
+        std::ifstream check(std::filesystem::path(path), std::ios::binary);
+        char magic[2] = {};
+        check.read(magic, 2);
+        if (magic[0] != 'M' || magic[1] != 'Z') {
+            error = L"下载文件不是有效的 Windows 安装包。";
+            check.close();
+            std::filesystem::remove(std::filesystem::path(path));
+            return false;
+        }
+        return true;
+    }
+    error = L"下载重定向次数过多。";
+    return false;
+}
+
+} // namespace
+
+UpdateDownloadResult downloadAndVerify(const std::wstring &url,
+                                       const std::wstring &version) {
+    UpdateDownloadResult result;
+    if (url.rfind(L"https://github.com/", 0) != 0) {
+        result.error = L"下载地址必须是 GitHub HTTPS 地址。";
+        return result;
+    }
+
+    wchar_t temp[MAX_PATH] = {};
+    if (GetTempPathW(MAX_PATH, temp) == 0) {
+        result.error = L"无法取得临时目录。";
+        return result;
+    }
+    std::wstring safeVersion;
+    for (wchar_t c : version) {
+        if (std::iswdigit(c) || c == L'.') {
+            safeVersion.push_back(c);
+        }
+    }
+    if (safeVersion.empty()) {
+        safeVersion = L"latest";
+    }
+    const auto directory = std::filesystem::path(temp) / "TuxIME";
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) {
+        result.error = L"无法创建临时目录。";
+        return result;
+    }
+    const auto path =
+        directory / (L"TuxIME-Setup-" + safeVersion + L".exe");
+    if (std::filesystem::exists(path)) {
+        std::filesystem::remove(path, ec);
+    }
+    if (!writeDownload(url, path.wstring(), result.error)) {
+        result.error = L"下载安装包失败：" + result.error;
+        return result;
+    }
+    result.ok = true;
+    result.path = path.wstring();
     return result;
 }
 

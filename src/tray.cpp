@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <windows.h>
@@ -244,6 +245,15 @@ struct TrayIcon::Impl {
                                       LPARAM lParam);
 };
 
+struct UpdateTaskState {
+    std::mutex mutex;
+    bool busy = false;
+    bool ready = false;
+    std::wstring version;
+    std::wstring path;
+    std::wstring error;
+};
+
 class SettingsWindow {
 public:
     explicit SettingsWindow(TrayIcon::Impl &tray) : tray_(tray) {}
@@ -291,6 +301,9 @@ private:
     std::wstring status_;
     std::wstring updateVersion_;
     std::wstring updateUrl_;
+    std::wstring updateAssetUrl_;
+    std::shared_ptr<UpdateTaskState> updateTask_ =
+        std::make_shared<UpdateTaskState>();
 };
 
 void TrayIcon::Impl::run() {
@@ -1346,13 +1359,16 @@ void SettingsWindow::drawUi() {
                 status_ = result.error;
                 updateVersion_.clear();
                 updateUrl_.clear();
+                updateAssetUrl_.clear();
             } else if (result.hasUpdate) {
                 updateVersion_ = result.version;
                 updateUrl_ = result.url;
+                updateAssetUrl_ = result.assetUrl;
                 status_ = L"发现新版本 " + result.version;
             } else {
                 updateVersion_.clear();
                 updateUrl_.clear();
+                updateAssetUrl_.clear();
                 status_ = L"已经是最新版本";
             }
         }
@@ -1362,8 +1378,79 @@ void SettingsWindow::drawUi() {
                 ShellExecuteW(nullptr, L"open", updateUrl_.c_str(), nullptr,
                               nullptr, SW_SHOWNORMAL);
             }
+            if (!updateAssetUrl_.empty()) {
+                ImGui::SameLine();
+                bool taskBusy = false;
+                bool taskReady = false;
+                {
+                    std::lock_guard<std::mutex> lock(updateTask_->mutex);
+                    taskBusy = updateTask_->busy;
+                    taskReady = updateTask_->ready;
+                }
+                if (taskBusy || taskReady) {
+                    ImGui::BeginDisabled();
+                }
+                if (ImGui::Button("下载并安装")) {
+                    auto task = updateTask_;
+                    {
+                        std::lock_guard<std::mutex> lock(task->mutex);
+                        task->busy = true;
+                        task->ready = false;
+                        task->error.clear();
+                    }
+                    const std::wstring asset = updateAssetUrl_;
+                    const std::wstring version = updateVersion_;
+                    std::thread([task, asset, version]() {
+                        const auto downloaded =
+                            tuxime::downloadAndVerify(asset, version);
+                        std::lock_guard<std::mutex> lock(task->mutex);
+                        task->busy = false;
+                        if (downloaded.ok) {
+                            task->ready = true;
+                            task->path = downloaded.path;
+                        } else {
+                            task->error = downloaded.error;
+                        }
+                    }).detach();
+                }
+                if (taskBusy || taskReady) {
+                    ImGui::EndDisabled();
+                }
+            }
             ImGui::SameLine();
             ImGui::TextDisabled("%s", toUtf8(updateVersion_).c_str());
+        }
+        {
+            bool busy = false;
+            bool ready = false;
+            std::wstring error;
+            std::wstring path;
+            {
+                std::lock_guard<std::mutex> lock(updateTask_->mutex);
+                busy = updateTask_->busy;
+                ready = updateTask_->ready;
+                error = updateTask_->error;
+                path = updateTask_->path;
+            }
+            if (busy) {
+                ImGui::TextDisabled("正在下载安装包，请稍候...");
+            } else if (ready) {
+                ImGui::TextDisabled("安装包已下载，可运行安装程序。");
+                ImGui::SameLine();
+                if (ImGui::Button("运行安装包")) {
+                    const auto result = reinterpret_cast<INT_PTR>(
+                        ShellExecuteW(nullptr, L"runas", path.c_str(),
+                                      L"/S", nullptr, SW_SHOWNORMAL));
+                    if (result > 32) {
+                        tray_.server.requestExit();
+                    } else {
+                        status_ = L"启动安装程序被取消或失败";
+                    }
+                }
+            } else if (!error.empty()) {
+                ImGui::TextColored(ImVec4(0.78f, 0.20f, 0.18f, 1.0f),
+                                   "%s", toUtf8(error).c_str());
+            }
         }
     }
 
