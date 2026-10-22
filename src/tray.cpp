@@ -317,6 +317,7 @@ private:
     void test();
     void syncNow();
     void runDiagnostics();
+    void restartServer();
     void render();
     void hide();
 
@@ -351,6 +352,8 @@ private:
         std::make_shared<UpdateTaskState>();
     std::vector<DiagnosticItem> diagnostics_;
     bool diagnosticsRun_ = false;
+    std::string tableMethod_ = "wbx";
+    TableOptions tableOptions_;
 };
 
 void TrayIcon::Impl::run() {
@@ -759,6 +762,8 @@ void SettingsWindow::loadValues() {
     copyText(password_, sizeof(password_), sync_.password);
     phrases_ = SettingsStore::loadPhrases();
     appearance_ = tuxime::loadAppearance();
+    tableOptions_ = SettingsStore::loadTableOptions(tableMethod_);
+    diagnosticsRun_ = false;
     status_ = L"就绪";
 }
 
@@ -814,6 +819,59 @@ void SettingsWindow::syncNow() {
     }
     tray_.server.clipboardSync().trigger();
     status_ = L"已请求同步";
+}
+
+void SettingsWindow::restartServer() {
+    const auto tempDir = std::filesystem::temp_directory_path() / "TuxIME";
+    std::error_code error;
+    std::filesystem::create_directories(tempDir, error);
+    const auto script = tempDir / "restart-server.ps1";
+    auto psQuote = [](const std::filesystem::path &value) {
+        std::string text = toUtf8(value.wstring());
+        size_t pos = 0;
+        while ((pos = text.find('\'', pos)) != std::string::npos) {
+            text.insert(pos, 1, '\'');
+            pos += 2;
+        }
+        return "'" + text + "'";
+    };
+    const auto serverExe = moduleDirectory() / "tuxime-server.exe";
+    std::ofstream out(script, std::ios::binary | std::ios::trunc);
+    out.write("\xEF\xBB\xBF", 3);
+    out << "$deadline = (Get-Date).AddSeconds(25)\n"
+        << "$p = Get-Process -Id " << GetCurrentProcessId()
+        << " -ErrorAction SilentlyContinue\n"
+        << "while ($p -and (Get-Date) -lt $deadline) { "
+           "Start-Sleep -Milliseconds 200; "
+           "$p = Get-Process -Id "
+        << GetCurrentProcessId() << " -ErrorAction SilentlyContinue }\n"
+        << "if ($p) { exit 1 }\n"
+        << "Start-Process -FilePath " << psQuote(serverExe)
+        << " -WorkingDirectory " << psQuote(moduleDirectory()) << "\n";
+    out.close();
+
+    wchar_t windir[MAX_PATH] = {};
+    GetEnvironmentVariableW(L"WINDIR", windir, MAX_PATH);
+    const std::wstring command =
+        quotePath(std::filesystem::path(windir) /
+                  "System32/WindowsPowerShell/v1.0/powershell.exe") +
+        L" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " +
+        quotePath(script);
+    std::vector<wchar_t> commandLine(command.begin(), command.end());
+    commandLine.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                        &process)) {
+        status_ = L"无法启动重启进程";
+        return;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    status_ = L"正在重启输入法...";
+    tray_.server.requestExit();
 }
 
 void SettingsWindow::runDiagnostics() {
@@ -912,8 +970,8 @@ void SettingsWindow::drawUi() {
     ImGui::BeginChild("##nav", ImVec2(180.0f * scale, 0), false);
     ImGui::Dummy(ImVec2(0, 10.0f * scale));
     const char *tabs[] = {"输入法", "剪贴板", "短语", "词典", "外观",
-                          "诊断", "关于"};
-    for (int i = 0; i < 7; ++i) {
+                          "码表", "诊断", "关于"};
+    for (int i = 0; i < 8; ++i) {
         const bool selected = page_ == i;
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Header,
@@ -1451,6 +1509,58 @@ void SettingsWindow::drawUi() {
             }
         }
     } else if (page_ == 5) {
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f),
+                           "码表输入法");
+        ImGui::Separator();
+        ImGui::TextDisabled(
+            "五笔、仓颉、二笔等码表的候选数和编码提示。");
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        const struct {
+            const char *id;
+            const char *label;
+        } tableMethods[] = {
+            {"wbx", "五笔字型"},       {"wbpy", "五笔拼音"},
+            {"cangjie", "仓颉"},       {"erbi", "二笔"},
+            {"zrm", "自然码"},         {"qxm", "冰蟾"},
+            {"db", "电报码"},          {"wanfeng", "晚风"},
+        };
+        const char *tableLabel = "五笔字型";
+        for (const auto &method : tableMethods) {
+            if (tableMethod_ == method.id) {
+                tableLabel = method.label;
+            }
+        }
+        ImGui::SetNextItemWidth(220.0f * scale);
+        if (ImGui::BeginCombo("##table-method", tableLabel)) {
+            for (const auto &method : tableMethods) {
+                const bool selected = tableMethod_ == method.id;
+                if (ImGui::Selectable(method.label, selected)) {
+                    tableMethod_ = method.id;
+                    tableOptions_ =
+                        SettingsStore::loadTableOptions(tableMethod_);
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::TextUnformatted("每页候选数");
+        ImGui::SetNextItemWidth(180.0f * scale);
+        ImGui::SliderInt("##table-page-size", &tableOptions_.pageSize, 3,
+                         10);
+        ImGui::Checkbox("显示编码提示", &tableOptions_.hint);
+        ImGui::Checkbox("使用全角字符", &tableOptions_.fullWidth);
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        if (ImGui::Button("保存码表设置")) {
+            SettingsStore::saveTableOptions(tableMethod_, tableOptions_);
+            status_ = L"码表设置已保存，重启输入法后生效";
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("保存并重启")) {
+            SettingsStore::saveTableOptions(tableMethod_, tableOptions_);
+            restartServer();
+        }
+        ImGui::TextDisabled("配置文件：table/<方案>.conf");
+    } else if (page_ == 6) {
         if (!diagnosticsRun_) {
             runDiagnostics();
         }

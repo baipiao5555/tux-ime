@@ -38,6 +38,12 @@ struct CustomPhrase {
     std::string text;
 };
 
+struct TableOptions {
+    int pageSize = 5;
+    bool hint = true;
+    bool fullWidth = true;
+};
+
 class SettingsStore {
 public:
     static std::filesystem::path appDataDir();
@@ -56,6 +62,10 @@ public:
     static std::filesystem::path customPhrasePath();
     static std::vector<CustomPhrase> loadPhrases();
     static void savePhrases(const std::vector<CustomPhrase> &phrases);
+
+    static TableOptions loadTableOptions(const std::string &name);
+    static void saveTableOptions(const std::string &name,
+                                 const TableOptions &options);
 
 private:
     static bool setIniValue(const std::filesystem::path &path,

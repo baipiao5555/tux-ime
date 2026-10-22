@@ -405,6 +405,40 @@ void SettingsStore::savePhrases(const std::vector<CustomPhrase> &phrases) {
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
 
+TableOptions SettingsStore::loadTableOptions(const std::string &name) {
+    TableOptions options;
+    const auto path = appDataDir().parent_path() / "Fcitx5" / "config" /
+                      "fcitx5" / "table" /
+                      std::filesystem::path(name + ".conf");
+    const auto lines = readLines(path);
+    if (lines.empty()) {
+        return options;
+    }
+    const auto pageSize = iniValue(lines, "Table", "PageSize", "5");
+    try {
+        options.pageSize = std::clamp(std::stoi(pageSize), 3, 10);
+    } catch (...) {
+        options.pageSize = 5;
+    }
+    options.hint = boolValue(iniValue(lines, "Table", "Hint", "True"));
+    options.fullWidth =
+        boolValue(iniValue(lines, "Table", "UseFullWidth", "True"));
+    return options;
+}
+
+void SettingsStore::saveTableOptions(const std::string &name,
+                                     const TableOptions &options) {
+    const auto path = appDataDir().parent_path() / "Fcitx5" / "config" /
+                      "fcitx5" / "table" /
+                      std::filesystem::path(name + ".conf");
+    setIniValue(path, "Table", "PageSize",
+                std::to_string(options.pageSize));
+    setIniValue(path, "Table", "Hint",
+                options.hint ? "True" : "False");
+    setIniValue(path, "Table", "UseFullWidth",
+                options.fullWidth ? "True" : "False");
+}
+
 bool SettingsStore::setIniValue(const std::filesystem::path &path,
                                 const std::string &section,
                                 const std::string &key,
