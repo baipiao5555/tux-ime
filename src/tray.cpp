@@ -948,6 +948,7 @@ void SettingsWindow::drawUi() {
         ImGui::SetNextItemWidth(240.0f * scale);
         ImGui::SliderInt("##font-size", &appearance_.fontSize, 12, 24);
         ImGui::Checkbox("深色候选窗", &appearance_.dark);
+        ImGui::Checkbox("纵向候选列表", &appearance_.vertical);
         ImGui::Checkbox("显示输入法/标点/简繁状态", &appearance_.showStatus);
         ImGui::Dummy(ImVec2(0, 10.0f * scale));
         if (ImGui::Button("保存外观")) {
@@ -958,7 +959,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.11.0");
+        ImGui::TextUnformatted("Tux IME 0.12.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));

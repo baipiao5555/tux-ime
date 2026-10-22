@@ -36,9 +36,13 @@ private:
     HWND hwnd_ = nullptr;
     ULONG_PTR gdiplusToken_ = 0;
     std::function<void(int)> selectCallback_;
-    std::vector<std::pair<float, float>> hitRanges_;
-    float statusHeight_ = 0.0f;
-    float rowHeight_ = 0.0f;
+    struct HitRange {
+        float left;
+        float right;
+        float top;
+        float bottom;
+    };
+    std::vector<HitRange> hitRanges_;
 };
 
 } // namespace fcitx

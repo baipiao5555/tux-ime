@@ -158,7 +158,13 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
         (appearance.showStatus && !status.empty()) ? 20.0f * scale : 0.0f;
     const float candidateHeight =
         (std::max)(36.0f, appearance.fontSize * 2.2f) * scale;
-    const float height = statusHeight + candidateHeight;
+    const float verticalGap = 2.0f * scale;
+    const float height =
+        appearance.vertical
+            ? statusHeight + padding * 2.0f +
+                  static_cast<float>(candidates.size()) * candidateHeight +
+                  static_cast<float>(candidates.size() - 1) * verticalGap
+            : statusHeight + candidateHeight;
     const float radius = 8.0f * scale;
     const float itemRadius = 5.0f * scale;
     const float textSize = appearance.fontSize * scale;
@@ -193,6 +199,7 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
     std::vector<ItemLayout> layout;
     layout.reserve(candidates.size());
     float totalWidth = padding * 2.0f;
+    float itemWidthMax = 0.0f;
     for (size_t i = 0; i < candidates.size(); ++i) {
         const auto label = displayLabel(candidates[i], i);
         Gdiplus::RectF labelBounds;
@@ -214,11 +221,15 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
             item.width += innerGap + item.commentWidth;
         }
         item.width = (std::max)(item.width, 20.0f * scale);
+        itemWidthMax = (std::max)(itemWidthMax, item.width);
         totalWidth += item.width;
         if (i > 0) {
             totalWidth += itemGap;
         }
         layout.push_back(item);
+    }
+    if (appearance.vertical) {
+        totalWidth = padding * 2.0f + itemWidthMax;
     }
     if (!status.empty()) {
         Gdiplus::RectF statusBounds;
@@ -294,19 +305,27 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
 
         float itemX = padding;
         hitRanges_.clear();
-        statusHeight_ = statusHeight;
-        rowHeight_ = candidateHeight;
         for (size_t i = 0; i < candidates.size(); ++i) {
             const auto &item = layout[i];
             const bool isSelected = static_cast<int>(i) == selected;
-            const float itemLeft = itemX - innerGap * 0.5f;
-            const float itemWidth = item.width + innerGap;
-            hitRanges_.emplace_back(itemLeft, itemLeft + itemWidth);
+            const float rowTop =
+                appearance.vertical
+                    ? statusHeight + padding +
+                          static_cast<float>(i) *
+                              (candidateHeight + verticalGap)
+                    : statusHeight;
+            const float itemLeft =
+                appearance.vertical ? padding : itemX - innerGap * 0.5f;
+            const float itemWidth = appearance.vertical
+                                        ? itemWidthMax
+                                        : item.width + innerGap;
+            hitRanges_.push_back({itemLeft, itemLeft + itemWidth, rowTop,
+                                  rowTop + candidateHeight});
             if (isSelected) {
                 Gdiplus::GraphicsPath selectedPath;
                 addRoundedRect(
                     selectedPath,
-                    Gdiplus::RectF(itemLeft, statusHeight + 4.0f * scale,
+                    Gdiplus::RectF(itemLeft, rowTop + 4.0f * scale,
                                    itemWidth,
                                    candidateHeight - 8.0f * scale),
                     itemRadius);
@@ -329,10 +348,10 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                 appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
                                 : Gdiplus::Color(255, 120, 125, 135));
 
-            const float textY = statusHeight +
+            const float textY = rowTop +
                                 (candidateHeight - textSize) / 2.0f -
                                 1.0f * scale;
-            const float labelY = statusHeight +
+            const float labelY = rowTop +
                                  (candidateHeight - labelSize) / 2.0f -
                                  0.5f * scale;
             graphics.DrawString(item.label.c_str(), -1, &labelFont,
@@ -342,7 +361,7 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                 Gdiplus::PointF(textX, textY), &textBrush);
             if (item.commentWidth > 0.0f) {
                 const float commentX = textX + item.textWidth + innerGap;
-                const float commentY = statusHeight +
+                const float commentY = rowTop +
                                        (candidateHeight - commentSize) / 2.0f -
                                        1.0f * scale;
                 graphics.DrawString(candidates[i].comment.c_str(), -1,
@@ -350,7 +369,9 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                     Gdiplus::PointF(commentX, commentY),
                                     &commentBrush);
             }
-            itemX += item.width + itemGap;
+            if (!appearance.vertical) {
+                itemX += item.width + itemGap;
+            }
         }
     }
 
@@ -424,15 +445,12 @@ LRESULT CALLBACK CandidateWindow::windowProc(HWND hwnd, UINT message,
             POINT point{};
             GetCursorPos(&point);
             ScreenToClient(hwnd, &point);
-            const float y = static_cast<float>(point.y);
-            if (y >= self->statusHeight_ &&
-                y <= self->statusHeight_ + self->rowHeight_) {
-                for (size_t i = 0; i < self->hitRanges_.size(); ++i) {
-                    if (point.x >= self->hitRanges_[i].first &&
-                        point.x <= self->hitRanges_[i].second) {
-                        self->selectCallback_(static_cast<int>(i));
-                        break;
-                    }
+            for (size_t i = 0; i < self->hitRanges_.size(); ++i) {
+                const auto &range = self->hitRanges_[i];
+                if (point.x >= range.left && point.x <= range.right &&
+                    point.y >= range.top && point.y <= range.bottom) {
+                    self->selectCallback_(static_cast<int>(i));
+                    break;
                 }
             }
         }

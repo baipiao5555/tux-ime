@@ -13,6 +13,7 @@ struct Appearance {
     int fontSize = 16;
     bool dark = false;
     bool showStatus = true;
+    bool vertical = false;
 };
 
 inline std::wstring appearancePath() {
@@ -46,6 +47,9 @@ inline Appearance loadAppearance() {
         } else if (key == "ShowStatus") {
             appearance.showStatus = value == "1" || value == "True" ||
                                     value == "true";
+        } else if (key == "Vertical") {
+            appearance.vertical = value == "1" || value == "True" ||
+                                  value == "true";
         }
     }
     return appearance;
@@ -61,6 +65,7 @@ inline void saveAppearance(const Appearance &appearance) {
     out << "FontSize=" << appearance.fontSize << '\n';
     out << "Dark=" << (appearance.dark ? "1" : "0") << '\n';
     out << "ShowStatus=" << (appearance.showStatus ? "1" : "0") << '\n';
+    out << "Vertical=" << (appearance.vertical ? "1" : "0") << '\n';
 }
 
 } // namespace tuxime
