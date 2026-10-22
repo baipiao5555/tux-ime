@@ -203,6 +203,10 @@ std::filesystem::path SettingsStore::profilePath() {
            "profile";
 }
 
+std::filesystem::path SettingsStore::pinyinUserDictPath() {
+    return appDataDir().parent_path() / "Fcitx5" / "pinyin" / "user.dict";
+}
+
 SyncConfig SettingsStore::loadSync() {
     SyncConfig config;
     const auto lines = readLines(syncConfigPath());

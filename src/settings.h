@@ -43,6 +43,7 @@ public:
     static std::filesystem::path syncConfigPath();
     static std::filesystem::path pinyinConfigPath();
     static std::filesystem::path profilePath();
+    static std::filesystem::path pinyinUserDictPath();
 
     static SyncConfig loadSync();
     static void saveSync(const SyncConfig &config);

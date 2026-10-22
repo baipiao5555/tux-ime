@@ -172,6 +172,39 @@ std::wstring chooseThemeFile(bool save, const wchar_t *title) {
     return ok ? std::wstring(path) : std::wstring();
 }
 
+std::filesystem::path moduleDirectory() {
+    wchar_t path[MAX_PATH] = {};
+    if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) {
+        return {};
+    }
+    return std::filesystem::path(path).parent_path();
+}
+
+std::wstring quotePath(const std::filesystem::path &path) {
+    return L"\"" + path.wstring() + L"\"";
+}
+
+bool runHiddenProcess(const std::wstring &commandLine, DWORD timeoutMs) {
+    std::vector<wchar_t> command(commandLine.begin(), commandLine.end());
+    command.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                        &process)) {
+        return false;
+    }
+    const DWORD wait = WaitForSingleObject(process.hProcess, timeoutMs);
+    DWORD exitCode = 1;
+    if (wait == WAIT_OBJECT_0) {
+        GetExitCodeProcess(process.hProcess, &exitCode);
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return wait == WAIT_OBJECT_0 && exitCode == 0;
+}
+
 int windowDpi(HWND hwnd) {
     using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
     static auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
@@ -755,8 +788,9 @@ void SettingsWindow::drawUi() {
                           ImVec4(0.93f, 0.95f, 0.98f, 1.0f));
     ImGui::BeginChild("##nav", ImVec2(180.0f * scale, 0), false);
     ImGui::Dummy(ImVec2(0, 10.0f * scale));
-    const char *tabs[] = {"输入法", "剪贴板", "短语", "外观", "关于"};
-    for (int i = 0; i < 5; ++i) {
+    const char *tabs[] = {"输入法", "剪贴板", "短语", "词典", "外观",
+                          "关于"};
+    for (int i = 0; i < 6; ++i) {
         const bool selected = page_ == i;
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Header,
@@ -1069,6 +1103,132 @@ void SettingsWindow::drawUi() {
             }
         }
     } else if (page_ == 3) {
+        ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f),
+                           "拼音用户词典");
+        ImGui::Separator();
+        ImGui::TextDisabled(
+            "导入/导出 libime 用户词典文本；导入后会自动重启输入法。");
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        const auto userDict = SettingsStore::pinyinUserDictPath();
+        const auto tool = moduleDirectory() / "libime_pinyindict.exe";
+        if (ImGui::Button("导出用户词典")) {
+            if (!std::filesystem::exists(userDict)) {
+                status_ = L"用户词典为空";
+            } else if (!std::filesystem::exists(tool)) {
+                status_ = L"缺少 libime_pinyindict.exe";
+            } else {
+                const std::wstring path =
+                    chooseTextFile(true, L"导出拼音用户词典");
+                if (!path.empty()) {
+                    const std::wstring command =
+                        quotePath(tool) + L" -d " + quotePath(userDict) +
+                        L" " + quotePath(std::filesystem::path(path));
+                    status_ = runHiddenProcess(command, 60000)
+                                  ? L"用户词典已导出"
+                                  : L"用户词典导出失败";
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("导入用户词典")) {
+            if (!std::filesystem::exists(tool)) {
+                status_ = L"缺少 libime_pinyindict.exe";
+            } else {
+                const std::wstring path =
+                    chooseTextFile(false, L"导入拼音用户词典");
+                if (!path.empty()) {
+                    const auto tempDir =
+                        std::filesystem::temp_directory_path() / "TuxIME";
+                    std::error_code error;
+                    std::filesystem::create_directories(tempDir, error);
+                    const auto imported = tempDir / "dict-import.dict";
+                    const std::wstring command =
+                        quotePath(tool) + L" " +
+                        quotePath(std::filesystem::path(path)) + L" " +
+                        quotePath(imported);
+                    if (!runHiddenProcess(command, 120000)) {
+                        status_ = L"词典文本转换失败";
+                    } else {
+                        const auto script = tempDir / "apply-dict.ps1";
+                        const auto serverExe =
+                            moduleDirectory() / "tuxime-server.exe";
+                        auto psQuote = [](const std::filesystem::path &value) {
+                            std::string text = toUtf8(value.wstring());
+                            size_t pos = 0;
+                            while ((pos = text.find('\'', pos)) !=
+                                   std::string::npos) {
+                                text.insert(pos, 1, '\'');
+                                pos += 2;
+                            }
+                            return "'" + text + "'";
+                        };
+                        std::ofstream out(script, std::ios::binary |
+                                                     std::ios::trunc);
+                        out.write("\xEF\xBB\xBF", 3);
+                        out << "param([int]$ServerPid)\n"
+                            << "$deadline = (Get-Date).AddSeconds(25)\n"
+                            << "$p = Get-Process -Id $ServerPid "
+                               "-ErrorAction SilentlyContinue\n"
+                            << "while ($p -and (Get-Date) -lt $deadline) { "
+                               "Start-Sleep -Milliseconds 200; "
+                               "$p = Get-Process -Id $ServerPid "
+                               "-ErrorAction SilentlyContinue }\n"
+                            << "if ($p) { exit 1 }\n"
+                            << "if (Test-Path "
+                            << psQuote(userDict)
+                            << ") { Copy-Item -LiteralPath "
+                            << psQuote(userDict) << " -Destination "
+                            << psQuote(std::filesystem::path(
+                                   userDict.wstring() + L".bak"))
+                            << " -Force }\n"
+                            << "Copy-Item -LiteralPath "
+                            << psQuote(imported) << " -Destination "
+                            << psQuote(userDict) << " -Force\n"
+                            << "Start-Process -FilePath "
+                            << psQuote(serverExe) << " -WorkingDirectory "
+                            << psQuote(moduleDirectory()) << "\n";
+                        out.close();
+                        const std::wstring windir = [] {
+                            wchar_t buffer[MAX_PATH] = {};
+                            GetEnvironmentVariableW(L"WINDIR", buffer,
+                                                    MAX_PATH);
+                            return std::wstring(buffer);
+                        }();
+                        const std::wstring powershell =
+                            windir +
+                            L"\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+                        std::wstring helperCommand =
+                            quotePath(std::filesystem::path(powershell)) +
+                            L" -NoProfile -ExecutionPolicy Bypass "
+                            L"-WindowStyle Hidden -File " +
+                            quotePath(script) + L" -ServerPid " +
+                            std::to_wstring(GetCurrentProcessId());
+                        std::vector<wchar_t> commandLine(
+                            helperCommand.begin(), helperCommand.end());
+                        commandLine.push_back(L'\0');
+                        STARTUPINFOW startup{};
+                        startup.cb = sizeof(startup);
+                        PROCESS_INFORMATION process{};
+                        if (!CreateProcessW(
+                                nullptr, commandLine.data(), nullptr, nullptr,
+                                FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                                &startup, &process)) {
+                            status_ = L"无法启动词典应用进程";
+                        } else {
+                            CloseHandle(process.hThread);
+                            CloseHandle(process.hProcess);
+                            status_ = L"正在应用词典并重启输入法...";
+                            tray_.server.requestExit();
+                        }
+                    }
+                }
+            }
+        }
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        ImGui::TextWrapped(
+            "文本格式：每行“词 拼音 频率”，例如“你好 ni'hao 0”。"
+            "导入会替换当前用户词典，并自动备份为 user.dict.bak。");
+    } else if (page_ == 4) {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "外观");
         ImGui::Separator();
         ImGui::TextDisabled("候选窗设置；保存后下一次按键生效。");

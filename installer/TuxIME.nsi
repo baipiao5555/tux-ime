@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APP_NAME "Tux IME"
-!define APP_VERSION "0.15.0"
+!define APP_VERSION "0.16.0"
 !define APP_PUBLISHER "Tux IME Project"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TuxIME"
 !define DIST_DIR "..\dist\TuxIME-final"

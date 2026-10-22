@@ -168,7 +168,8 @@ Copy-Item (Join-Path $root "README.md") $dist
 
 # Remove development-only executables from the distribution.
 Get-ChildItem (Join-Path $dist "bin") -File | Where-Object {
-    $_.Name -match '^(Fcitx5|fcitx5-|libime_|tux-client-test|tux-ime-test|server-client-test|candidate-test)' -or
+    ($_.Name -match '^(Fcitx5|fcitx5-|libime_|tux-client-test|tux-ime-test|server-client-test|candidate-test)' -and
+        $_.Name -ne 'libime_pinyindict.exe') -or
     $_.Extension -eq ".a"
 } | Remove-Item -Force
 
