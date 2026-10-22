@@ -1,5 +1,71 @@
 #include "tsf.h"
 
+namespace {
+
+class CaretSession final : public ITfEditSession {
+public:
+    explicit CaretSession(ITfContext *context) : context_(context) {}
+
+    STDMETHODIMP QueryInterface(REFIID riid, void **object) override {
+        if (!object) {
+            return E_INVALIDARG;
+        }
+        *object = nullptr;
+        if (IsEqualIID(riid, IID_IUnknown) ||
+            IsEqualIID(riid, IID_ITfEditSession)) {
+            *object = static_cast<ITfEditSession *>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() override { return ++refCount_; }
+    STDMETHODIMP_(ULONG) Release() override {
+        const ULONG count = --refCount_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+        CComPtr<ITfContextView> view;
+        if (FAILED(context_->GetActiveView(&view)) || !view) {
+            return E_FAIL;
+        }
+        TF_SELECTION selection{};
+        ULONG fetched = 0;
+        if (FAILED(context_->GetSelection(ec, TF_DEFAULT_SELECTION, 1,
+                                          &selection, &fetched)) ||
+            fetched == 0 || !selection.range) {
+            return E_FAIL;
+        }
+        RECT rect{};
+        BOOL clipped = FALSE;
+        const HRESULT result =
+            view->GetTextExt(ec, selection.range, &rect, &clipped);
+        selection.range->Release();
+        if (FAILED(result) || rect.bottom <= rect.top) {
+            return E_FAIL;
+        }
+        rect_ = rect;
+        valid_ = true;
+        return S_OK;
+    }
+
+    bool valid() const { return valid_; }
+    const RECT &rect() const { return rect_; }
+
+private:
+    ~CaretSession() = default;
+    LONG refCount_ = 1;
+    CComPtr<ITfContext> context_;
+    RECT rect_{};
+    bool valid_ = false;
+};
+
+} // namespace
+
 namespace fcitx {
 bool Tsf::initKeyEventSink() {
     CComPtr<ITfKeystrokeMgr> keystrokeMgr;
@@ -93,6 +159,18 @@ bool Tsf::requestEditSession() {
 }
 
 RECT Tsf::caretRect() const {
+    if (textEditSinkContext_ && clientId_ != TF_CLIENTID_NULL) {
+        CComPtr<CaretSession> session;
+        session.Attach(new CaretSession(textEditSinkContext_));
+        HRESULT sessionResult = E_FAIL;
+        if (SUCCEEDED(textEditSinkContext_->RequestEditSession(
+                clientId_, session, TF_ES_SYNC | TF_ES_READ,
+                &sessionResult)) &&
+            SUCCEEDED(sessionResult) && session->valid()) {
+            return session->rect();
+        }
+    }
+
     GUITHREADINFO info{};
     info.cbSize = sizeof(info);
     if (GetGUIThreadInfo(GetCurrentThreadId(), &info) && info.hwndCaret) {

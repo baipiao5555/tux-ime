@@ -475,7 +475,9 @@ void Session::sendKeyResult(uint64_t request, bool handled) {
     writer.str(preedit);
     writer.str(aux);
     writer.str(commit);
-    writer.str(status);
+    if (!legacyProtocol_) {
+        writer.str(status);
+    }
     for (const auto &candidate : candidates) {
         writer.str(candidate.label);
         writer.str(candidate.text);
@@ -517,15 +519,18 @@ void Session::dispatch(ipc::Type type, uint64_t request,
     case ipc::Type::Hello: {
         const uint32_t pid = reader.u32();
         const uint32_t version = reader.u32();
-        if (!reader.ok() || version != ipc::kProtocolVersion) {
+        if (!reader.ok() ||
+            (version != 1 && version != ipc::kProtocolVersion)) {
             alive_ = false;
             return;
         }
         pid_ = pid;
+        protocolVersion_ = version;
+        legacyProtocol_ = version == 1;
         server_.runOnFcitxThread([this]() { createContext(); });
         ipc::Writer writer;
         writer.u32(id_);
-        writer.u32(ipc::kProtocolVersion);
+        writer.u32(version);
         send(ipc::Type::HelloAck, request, writer.take());
         break;
     }

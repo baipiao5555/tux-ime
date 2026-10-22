@@ -90,6 +90,7 @@ class Tsf : public ITfTextInputProcessorEx,
     void clearCompositionState();
     void applyServerResult(const ServerKeyResult &result);
     void updateCandidateWindow(const RECT &caret);
+    void updateCaretFromRange(TfEditCookie ec);
     RECT caretRect() const;
     void connectServer();
 
@@ -104,5 +105,8 @@ class Tsf : public ITfTextInputProcessorEx,
     CComPtr<ITfRange> compositionRange_;
     bool pendingCancel_ = false;
     bool endingComposition_ = false;
+    bool pendingCandidateUpdate_ = false;
+    RECT lastCaretRect_{};
+    bool hasCaretRect_ = false;
 };
 } // namespace fcitx

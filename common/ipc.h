@@ -7,7 +7,7 @@
 
 namespace tuxime::ipc {
 
-constexpr uint32_t kProtocolVersion = 1;
+constexpr uint32_t kProtocolVersion = 2;
 constexpr wchar_t kPipePrefix[] = L"\\\\.\\pipe\\tuxime-";
 
 enum class Type : uint32_t {

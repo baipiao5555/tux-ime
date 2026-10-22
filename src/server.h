@@ -91,6 +91,8 @@ private:
     Server &server_;
     uint32_t id_;
     uint32_t pid_;
+    uint32_t protocolVersion_ = ipc::kProtocolVersion;
+    bool legacyProtocol_ = false;
     HANDLE pipe_;
     std::atomic<bool> alive_{true};
     std::thread thread_;
