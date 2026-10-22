@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APP_NAME "Tux IME"
-!define APP_VERSION "0.13.1"
+!define APP_VERSION "0.14.0"
 !define APP_PUBLISHER "Tux IME Project"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TuxIME"
 !define DIST_DIR "..\dist\TuxIME-final"
@@ -48,18 +48,25 @@ Section "Tux IME" SecMain
     SetShellVarContext all
     SetOutPath "$INSTDIR"
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
+    System::Call 'kernel32::GetTickCount()i.r0'
     IfFileExists "$INSTDIR\bin\tuxime-x86_64.dll" 0 tux_no_old_dll
-    Delete "$INSTDIR\bin\tuxime-x86_64.old.dll"
-    Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.old.dll"
+    StrCpy $1 "$INSTDIR\bin\tuxime-x86_64.old-$0.dll"
+    Delete "$1"
+    Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$1"
     tux_no_old_dll:
     IfFileExists "$INSTDIR\bin\tuxime-x86.dll" 0 tux_no_old_x86
-    Delete "$INSTDIR\bin\tuxime-x86.old.dll"
-    Rename "$INSTDIR\bin\tuxime-x86.dll" "$INSTDIR\bin\tuxime-x86.old.dll"
+    StrCpy $2 "$INSTDIR\bin\tuxime-x86.old-$0.dll"
+    Delete "$2"
+    Rename "$INSTDIR\bin\tuxime-x86.dll" "$2"
     tux_no_old_x86:
     File /r "${DIST_DIR}\*.*"
     File "setup-language.ps1"
     ; The previous DLL can stay locked by a running TSF client. It is no
-    ; longer referenced, so remove it now or at the next reboot.
+    ; longer referenced, so remove it now or at the next reboot. A unique
+    ; backup name avoids colliding with an older .old.dll that is also
+    ; still loaded by another process.
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old-*.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.old-*.dll"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.old.dll"
 
@@ -103,30 +110,32 @@ Section "Uninstall"
 
     ; A TSF client in a still-running application can relaunch the old server
     ; right after taskkill. Rename the executables first so it cannot come
-    ; back from the path we are about to delete.
+    ; back from the path we are about to delete. Unique names avoid a
+    ; collision with a previous uninstall's still-locked files.
+    System::Call 'kernel32::GetTickCount()i.r0'
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
     IfFileExists "$INSTDIR\bin\tuxime-server.exe" 0 tux_no_server_rename
-    Rename "$INSTDIR\bin\tuxime-server.exe" "$INSTDIR\bin\tuxime-server.uninstall.exe"
+    Rename "$INSTDIR\bin\tuxime-server.exe" "$INSTDIR\bin\tuxime-server.uninstall-$0.exe"
     tux_no_server_rename:
-    Delete "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
-    Delete "$INSTDIR\bin\tuxime-x86.uninstall.dll"
     IfFileExists "$INSTDIR\bin\tuxime-x86_64.dll" 0 tux_no_dll_rename
-    Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
+    Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.uninstall-$0.dll"
     tux_no_dll_rename:
     IfFileExists "$INSTDIR\bin\tuxime-x86.dll" 0 tux_no_x86_dll_rename
-    Rename "$INSTDIR\bin\tuxime-x86.dll" "$INSTDIR\bin\tuxime-x86.uninstall.dll"
+    Rename "$INSTDIR\bin\tuxime-x86.dll" "$INSTDIR\bin\tuxime-x86.uninstall-$0.dll"
     tux_no_x86_dll_rename:
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
-    nsExec::ExecToLog 'taskkill /IM tuxime-server.uninstall.exe /F'
+    nsExec::ExecToLog 'taskkill /IM tuxime-server.uninstall-*.exe /F'
     Sleep 500
 
     DeleteRegKey HKLM "${APP_KEY}"
     DeleteRegKey HKLM "Software\TuxIME"
     Delete "$SMPROGRAMS\Tux IME\Tux IME 设置.lnk"
     RMDir "$SMPROGRAMS\Tux IME"
-    Delete /REBOOTOK "$INSTDIR\bin\tuxime-server.uninstall.exe"
-    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
-    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.uninstall.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-server.uninstall-*.exe"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.uninstall-*.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.uninstall-*.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old-*.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.old-*.dll"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.old.dll"
     RMDir /r "$INSTDIR"

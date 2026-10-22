@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -50,6 +51,13 @@ std::wstring displayLabel(const ServerCandidate &candidate, size_t index) {
         return candidate.label;
     }
     return std::to_wstring(index + 1) + L".";
+}
+
+Gdiplus::Color colorFromArgb(uint32_t value) {
+    return Gdiplus::Color(static_cast<BYTE>((value >> 24) & 0xff),
+                          static_cast<BYTE>((value >> 16) & 0xff),
+                          static_cast<BYTE>((value >> 8) & 0xff),
+                          static_cast<BYTE>(value & 0xff));
 }
 
 } // namespace
@@ -285,19 +293,26 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                       static_cast<float>(windowHeight)),
                        radius);
         Gdiplus::SolidBrush background(
-            appearance.dark ? Gdiplus::Color(246, 30, 32, 36)
-                            : Gdiplus::Color(246, 250, 250, 250));
+            appearance.customColors
+                ? colorFromArgb(appearance.backgroundColor)
+                : (appearance.dark ? Gdiplus::Color(246, 30, 32, 36)
+                                   : Gdiplus::Color(246, 250, 250, 250)));
         graphics.FillPath(&background, &backgroundPath);
         Gdiplus::Pen border(
-            appearance.dark ? Gdiplus::Color(220, 70, 74, 82)
-                            : Gdiplus::Color(220, 190, 195, 205),
+            appearance.customColors
+                ? colorFromArgb(appearance.borderColor)
+                : (appearance.dark ? Gdiplus::Color(220, 70, 74, 82)
+                                   : Gdiplus::Color(220, 190, 195, 205)),
             1.0f * scale);
         graphics.DrawPath(&border, &backgroundPath);
 
         if (!status.empty() && appearance.showStatus) {
             Gdiplus::SolidBrush statusBrush(
-                appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
-                                : Gdiplus::Color(255, 110, 118, 130));
+                appearance.customColors
+                    ? colorFromArgb(appearance.statusColor)
+                    : (appearance.dark
+                           ? Gdiplus::Color(255, 150, 155, 165)
+                           : Gdiplus::Color(255, 110, 118, 130)));
             graphics.DrawString(status.c_str(), -1, &statusFont,
                                 Gdiplus::PointF(padding, 3.0f * scale),
                                 &statusBrush);
@@ -330,23 +345,41 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
                                    candidateHeight - 8.0f * scale),
                     itemRadius);
                 Gdiplus::SolidBrush selectedBrush(
-                    appearance.dark ? Gdiplus::Color(255, 48, 78, 130)
-                                    : Gdiplus::Color(255, 214, 232, 255));
+                    appearance.customColors
+                        ? colorFromArgb(
+                              appearance.selectedBackgroundColor)
+                        : (appearance.dark
+                               ? Gdiplus::Color(255, 48, 78, 130)
+                               : Gdiplus::Color(255, 214, 232, 255)));
                 graphics.FillPath(&selectedBrush, &selectedPath);
             }
 
             Gdiplus::SolidBrush labelBrush(
-                isSelected
-                    ? (appearance.dark ? Gdiplus::Color(255, 140, 185, 255)
-                                       : Gdiplus::Color(255, 70, 110, 160))
-                    : (appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
-                                       : Gdiplus::Color(255, 130, 135, 145)));
+                appearance.customColors
+                    ? colorFromArgb(isSelected
+                                        ? appearance.selectedTextColor
+                                        : appearance.statusColor)
+                    : (isSelected
+                           ? (appearance.dark
+                                  ? Gdiplus::Color(255, 140, 185, 255)
+                                  : Gdiplus::Color(255, 70, 110, 160))
+                           : (appearance.dark
+                                  ? Gdiplus::Color(255, 150, 155, 165)
+                                  : Gdiplus::Color(255, 130, 135, 145))));
             Gdiplus::SolidBrush textBrush(
-                appearance.dark ? Gdiplus::Color(255, 235, 236, 238)
-                                : Gdiplus::Color(255, 28, 30, 34));
+                appearance.customColors
+                    ? colorFromArgb(isSelected
+                                        ? appearance.selectedTextColor
+                                        : appearance.textColor)
+                    : (appearance.dark
+                           ? Gdiplus::Color(255, 235, 236, 238)
+                           : Gdiplus::Color(255, 28, 30, 34)));
             Gdiplus::SolidBrush commentBrush(
-                appearance.dark ? Gdiplus::Color(255, 150, 155, 165)
-                                : Gdiplus::Color(255, 120, 125, 135));
+                appearance.customColors
+                    ? colorFromArgb(appearance.statusColor)
+                    : (appearance.dark
+                           ? Gdiplus::Color(255, 150, 155, 165)
+                           : Gdiplus::Color(255, 120, 125, 135)));
 
             const float textY = rowTop +
                                 (candidateHeight - textSize) / 2.0f -

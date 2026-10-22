@@ -105,6 +105,35 @@ void copyText(char *destination, size_t size, const std::string &text) {
     destination[length] = '\0';
 }
 
+void unpackColor(uint32_t color, float values[4]) {
+    values[0] = static_cast<float>((color >> 16) & 0xff) / 255.0f;
+    values[1] = static_cast<float>((color >> 8) & 0xff) / 255.0f;
+    values[2] = static_cast<float>(color & 0xff) / 255.0f;
+    values[3] = static_cast<float>((color >> 24) & 0xff) / 255.0f;
+}
+
+uint32_t packColor(const float values[4]) {
+    auto channel = [](float value) {
+        return static_cast<uint32_t>(
+            (std::clamp)(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+    };
+    return (channel(values[3]) << 24) | (channel(values[0]) << 16) |
+           (channel(values[1]) << 8) | channel(values[2]);
+}
+
+bool colorEdit(const char *label, uint32_t &color, float scale) {
+    float values[4];
+    unpackColor(color, values);
+    ImGui::SetNextItemWidth(180.0f * scale);
+    if (ImGui::ColorEdit4(label, values,
+                          ImGuiColorEditFlags_AlphaBar |
+                              ImGuiColorEditFlags_AlphaPreviewHalf)) {
+        color = packColor(values);
+        return true;
+    }
+    return false;
+}
+
 std::wstring chooseTextFile(bool save, const wchar_t *title) {
     wchar_t path[MAX_PATH] = {};
     OPENFILENAMEW dialog{};
@@ -1028,6 +1057,24 @@ void SettingsWindow::drawUi() {
         ImGui::Checkbox("深色候选窗", &appearance_.dark);
         ImGui::Checkbox("纵向候选列表", &appearance_.vertical);
         ImGui::Checkbox("显示输入法/标点/简繁状态", &appearance_.showStatus);
+        ImGui::Checkbox("自定义候选窗颜色", &appearance_.customColors);
+        if (appearance_.customColors) {
+            if (ImGui::Button("恢复默认配色")) {
+                appearance_.customColors = false;
+                tuxime::setDefaultColors(appearance_);
+            }
+            colorEdit("背景色##candidate-bg", appearance_.backgroundColor,
+                      scale);
+            colorEdit("文字色##candidate-text", appearance_.textColor, scale);
+            colorEdit("选中背景色##candidate-selected-bg",
+                      appearance_.selectedBackgroundColor, scale);
+            colorEdit("选中文字色##candidate-selected-text",
+                      appearance_.selectedTextColor, scale);
+            colorEdit("边框色##candidate-border", appearance_.borderColor,
+                      scale);
+            colorEdit("状态栏文字色##candidate-status",
+                      appearance_.statusColor, scale);
+        }
         ImGui::Dummy(ImVec2(0, 10.0f * scale));
         if (ImGui::Button("保存外观")) {
             tuxime::saveAppearance(appearance_);
@@ -1037,7 +1084,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.13.1");
+        ImGui::TextUnformatted("Tux IME 0.14.0");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
