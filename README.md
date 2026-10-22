@@ -15,7 +15,7 @@
 
 ## 当前状态
 
-**0.10.0 测试版。** 安装器会自动注册 TSF 组件并把 “Tux IME” 加入
+**0.11.0 测试版。** 安装器会自动注册 TSF 组件并把 “Tux IME” 加入
 简体中文键盘列表，安装后无需手工改注册表。这个版本还不是正式版；
 正式版要求见下方“距离正式版还缺什么”。
 
@@ -24,7 +24,7 @@
 - Fcitx5 5.1.22 核心、libime 1.1.17、fcitx5-chinese-addons 5.1.15 的 Windows 构建
 - 拼音引擎、用户词典、模糊拼音配置（Fcitx5 addon 配置）
 - 多输入法：拼音、双拼、五笔、五笔拼音、仓颉、二笔、自然码、冰蟾、电报码、晚风；可在托盘和设置里切换
-- `tuxime-server.exe`：嵌入 Fcitx5，提供命名管道服务
+- `tuxime-server.exe`：嵌入 Fcitx5，提供命名管道服务；并发启动时只保留一个服务进程
 - `tuxime-x86_64.dll`：独立 TSF CLSID/Profile，支持组合文本、提交、候选选择和回车/退格/ESC
 - 候选窗：GDI+ 分层窗口，跟随光标，数字键选择，支持鼠标点选
 - 服务端与 TSF 前端通过按用户 SID 隔离的命名管道通信
@@ -43,7 +43,7 @@
 
 尚未完成：
 
-- 32 位 TSF（当前仅支持 64 位 Windows）和 ARM64
+- ARM64（32 位程序已支持，需运行在 64 位 Windows 上）
 - 自动更新
 - 完整主题编辑器（目前只有字号、深色、状态栏开关）
 - 双拼/五笔的内置图形化配置
@@ -56,7 +56,7 @@
 正式版不会只改版本号。需要完成并验证：
 
 - Windows 10/11、常见应用（记事本、Office、Chrome/Edge、微信、VSCode）测试矩阵
-- 32 位程序和 ARM64 支持
+- ARM64 支持
 - 剪贴板同步在真实 SyncClipboard/WebDAV 服务上的完整链路验证
 - 设置界面的完整主题、双拼/五笔配置、词典导入导出
 - 自动更新与安装/卸载异常恢复
@@ -124,7 +124,7 @@ TuxIME/
 推荐使用 Release 里的 `TuxIME-Setup-*.exe`。安装器会：
 
 1. 安装到 `C:\Program Files\TuxIME`（需要管理员权限）。
-2. 注册 64 位 TSF 组件，并把 “Tux IME” 加入简体中文键盘列表。
+2. 注册 64 位和 32 位 TSF 组件，并把 “Tux IME” 加入简体中文键盘列表。
 3. 把 Tux IME 设为默认中文输入法，同时保留系统里已有输入法。
 4. 创建开始菜单 “Tux IME 设置” 快捷方式。
 
@@ -132,10 +132,10 @@ TuxIME/
 立即同步剪贴板或退出服务。卸载时安装器会从语言列表和注册表中移除 Tux IME。
 
 如果使用绿色版（不运行安装器），把 `dist/TuxIME-final` 放到测试目录，以管理员身份运行
-`regsvr32 /s <路径>\bin\tuxime-x86_64.dll`，然后运行
+`regsvr32 /s <路径>\bin\tuxime-x86_64.dll` 和
+`C:\Windows\SysWOW64\regsvr32.exe /s <路径>\bin\tuxime-x86.dll`，然后运行
 `installer/setup-language.ps1` 完成语言列表注册。卸载时先运行
-`installer/setup-language.ps1 -Remove`，再执行
-`regsvr32 /u /s <路径>\bin\tuxime-x86_64.dll`。
+`installer/setup-language.ps1 -Remove`，再反注册两个 DLL。
 
 建议首次安装前备份当前输入法设置。卸载前请关闭正在使用输入法的程序；被占用的
 TSF DLL 会在下次重启时自动删除。

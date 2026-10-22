@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APP_NAME "Tux IME"
-!define APP_VERSION "0.10.0"
+!define APP_VERSION "0.11.0"
 !define APP_PUBLISHER "Tux IME Project"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TuxIME"
 !define DIST_DIR "..\dist\TuxIME-final"
@@ -52,14 +52,22 @@ Section "Tux IME" SecMain
     Delete "$INSTDIR\bin\tuxime-x86_64.old.dll"
     Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.old.dll"
     tux_no_old_dll:
+    IfFileExists "$INSTDIR\bin\tuxime-x86.dll" 0 tux_no_old_x86
+    Delete "$INSTDIR\bin\tuxime-x86.old.dll"
+    Rename "$INSTDIR\bin\tuxime-x86.dll" "$INSTDIR\bin\tuxime-x86.old.dll"
+    tux_no_old_x86:
     File /r "${DIST_DIR}\*.*"
     File "setup-language.ps1"
     ; The previous DLL can stay locked by a running TSF client. It is no
     ; longer referenced, so remove it now or at the next reboot.
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.old.dll"
 
     ${If} ${RunningX64}
         ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /s "$INSTDIR\bin\tuxime-x86_64.dll"'
+        IfFileExists "$INSTDIR\bin\tuxime-x86.dll" 0 tux_no_x86_register
+        ExecWait '"$WINDIR\SysWOW64\regsvr32.exe" /s "$INSTDIR\bin\tuxime-x86.dll"'
+        tux_no_x86_register:
         ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\setup-language.ps1"'
     ${EndIf}
 
@@ -88,6 +96,9 @@ Section "Uninstall"
     ${If} ${RunningX64}
         ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\setup-language.ps1" -Remove'
         ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /u /s "$INSTDIR\bin\tuxime-x86_64.dll"'
+        IfFileExists "$INSTDIR\bin\tuxime-x86.dll" 0 tux_no_x86_unregister
+        ExecWait '"$WINDIR\SysWOW64\regsvr32.exe" /u /s "$INSTDIR\bin\tuxime-x86.dll"'
+        tux_no_x86_unregister:
     ${EndIf}
 
     ; A TSF client in a still-running application can relaunch the old server
@@ -98,9 +109,13 @@ Section "Uninstall"
     Rename "$INSTDIR\bin\tuxime-server.exe" "$INSTDIR\bin\tuxime-server.uninstall.exe"
     tux_no_server_rename:
     Delete "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
+    Delete "$INSTDIR\bin\tuxime-x86.uninstall.dll"
     IfFileExists "$INSTDIR\bin\tuxime-x86_64.dll" 0 tux_no_dll_rename
     Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
     tux_no_dll_rename:
+    IfFileExists "$INSTDIR\bin\tuxime-x86.dll" 0 tux_no_x86_dll_rename
+    Rename "$INSTDIR\bin\tuxime-x86.dll" "$INSTDIR\bin\tuxime-x86.uninstall.dll"
+    tux_no_x86_dll_rename:
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
     nsExec::ExecToLog 'taskkill /IM tuxime-server.uninstall.exe /F'
     Sleep 500
@@ -111,7 +126,9 @@ Section "Uninstall"
     RMDir "$SMPROGRAMS\Tux IME"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-server.uninstall.exe"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.uninstall.dll"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86.old.dll"
     RMDir /r "$INSTDIR"
     RMDir /REBOOTOK "$INSTDIR\bin"
     RMDir /REBOOTOK "$INSTDIR\lib"

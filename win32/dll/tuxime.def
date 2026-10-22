@@ -1,4 +1,3 @@
-LIBRARY tuxime-x86_64
 EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE

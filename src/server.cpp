@@ -644,6 +644,10 @@ Server::~Server() {
     if (pipeThread_.joinable()) {
         pipeThread_.join();
     }
+    if (initialPipe_) {
+        CloseHandle(initialPipe_);
+        initialPipe_ = nullptr;
+    }
     sessions_.clear();
 }
 
@@ -703,8 +707,43 @@ void Server::registerDefaultGroup() {
     manager.save();
 }
 
+bool Server::claimPipe() {
+    SECURITY_ATTRIBUTES attributes{};
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ipc::makePipeSecurity(attributes, descriptor)) {
+        FCITX_ERROR() << "failed to create pipe security descriptor";
+        return false;
+    }
+    const std::wstring name = ipc::pipeName();
+    if (name.empty()) {
+        LocalFree(descriptor);
+        return false;
+    }
+    HANDLE pipe = CreateNamedPipeW(
+        name.c_str(),
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+            PIPE_REJECT_REMOTE_CLIENTS,
+        PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, &attributes);
+    LocalFree(descriptor);
+    if (pipe == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_ACCESS_DENIED || error == ERROR_PIPE_BUSY) {
+            FCITX_INFO() << "another tux-ime server is already running";
+        } else {
+            FCITX_ERROR() << "CreateNamedPipe failed: " << error;
+        }
+        return false;
+    }
+    initialPipe_ = pipe;
+    return true;
+}
+
 bool Server::initialize() {
     setupEnvironment();
+    if (!claimPipe()) {
+        return false;
+    }
     SettingsStore::ensureAddonDefaults();
     fcitx::Log::setLogRule("*=4");
 
@@ -874,28 +913,38 @@ void Server::acceptLoop() {
 
     bool first = true;
     while (running_) {
-        DWORD openMode = PIPE_ACCESS_DUPLEX;
-        if (first) {
-            openMode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
-        }
-        HANDLE pipe = CreateNamedPipeW(
-            name.c_str(), openMode,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
-                PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0,
-            &attributes);
-        if (pipe == INVALID_HANDLE_VALUE) {
-            const DWORD error = GetLastError();
-            if (first &&
-                (error == ERROR_ACCESS_DENIED || error == ERROR_PIPE_BUSY)) {
-                FCITX_INFO() << "another tux-ime server is already running";
-                break;
+        HANDLE pipe = nullptr;
+        if (initialPipe_) {
+            // Keep the FILE_FLAG_FIRST_PIPE_INSTANCE handle created before
+            // the Fcitx instance started, so a second UI-less server exits
+            // instead of leaving an idle process and tray icon behind.
+            pipe = initialPipe_;
+            initialPipe_ = nullptr;
+            first = false;
+        } else {
+            DWORD openMode = PIPE_ACCESS_DUPLEX;
+            if (first) {
+                openMode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
             }
-            FCITX_ERROR() << "CreateNamedPipe failed: " << error;
-            Sleep(100);
-            continue;
+            pipe = CreateNamedPipeW(
+                name.c_str(), openMode,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+                    PIPE_REJECT_REMOTE_CLIENTS,
+                PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0,
+                &attributes);
+            if (pipe == INVALID_HANDLE_VALUE) {
+                const DWORD error = GetLastError();
+                if (first &&
+                    (error == ERROR_ACCESS_DENIED || error == ERROR_PIPE_BUSY)) {
+                    FCITX_INFO() << "another tux-ime server is already running";
+                    break;
+                }
+                FCITX_ERROR() << "CreateNamedPipe failed: " << error;
+                Sleep(100);
+                continue;
+            }
+            first = false;
         }
-        first = false;
         listenPipe_ = pipe;
 
         const BOOL connected =

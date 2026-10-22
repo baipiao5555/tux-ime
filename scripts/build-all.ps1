@@ -132,6 +132,15 @@ if (-not $SkipWin32) {
             "-DCMAKE_CXX_COMPILER=cl")
         cmake --build (Join-Path $BuildRoot "win32")
     }
+    Invoke-Step "TSF frontend (32-bit)" {
+        # A separate Visual Studio generator build is used so the x86 and x64
+        # toolchains never share compiler environment variables.
+        & cmake @("-B", (Join-Path $BuildRoot "win32-x86"),
+            "-S", (Join-Path $root "win32"),
+            "-G", "Visual Studio 17 2022", "-A", "Win32",
+            "-DTUX_USE_MSVC=ON")
+        cmake --build (Join-Path $BuildRoot "win32-x86") --config Release
+    }
 }
 
 Write-Host "==> assemble dist/TuxIME-final" -ForegroundColor Cyan
@@ -148,6 +157,13 @@ if (-not (Test-Path (Join-Path $win32Dir "tuxime-x86_64.dll"))) {
 }
 Copy-Item (Join-Path $win32Dir "tuxime-x86_64.dll") (Join-Path $dist "bin")
 Copy-Item (Join-Path $win32Dir "penguin.ico") (Join-Path $dist "bin")
+
+$win32x86Dir = Join-Path $BuildRoot "win32-x86/dll/Release"
+if (Test-Path (Join-Path $win32x86Dir "tuxime-x86.dll")) {
+    Copy-Item (Join-Path $win32x86Dir "tuxime-x86.dll") (Join-Path $dist "bin")
+} else {
+    Write-Warning "32-bit TSF DLL was not found; installer will only include 64-bit TSF."
+}
 Copy-Item (Join-Path $root "README.md") $dist
 
 # Remove development-only executables from the distribution.

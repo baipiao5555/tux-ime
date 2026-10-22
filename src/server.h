@@ -135,6 +135,7 @@ public:
 
 private:
     void acceptLoop();
+    bool claimPipe();
     void stopAccepting();
     void setupEnvironment();
     void registerDefaultGroup();
@@ -143,6 +144,7 @@ private:
     std::unique_ptr<fcitx::EventDispatcher> dispatcher_;
     std::atomic<bool> running_{true};
     std::atomic<HANDLE> listenPipe_{nullptr};
+    HANDLE initialPipe_ = nullptr;
     std::thread pipeThread_;
     std::mutex sessionsMutex_;
     std::unordered_map<uint32_t, std::shared_ptr<Session>> sessions_;
