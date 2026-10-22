@@ -242,6 +242,8 @@ PinyinSettings SettingsStore::loadPinyin() {
     } catch (...) {
         settings.pageSize = 7;
     }
+    settings.shuangpinProfile =
+        iniValue(lines, "", "ShuangpinProfile", "Ziranma");
     settings.fuzzyZ = boolValue(iniValue(lines, "Fuzzy", "Z_ZH", "False"));
     settings.fuzzyC = boolValue(iniValue(lines, "Fuzzy", "C_CH", "False"));
     settings.fuzzyS = boolValue(iniValue(lines, "Fuzzy", "S_SH", "False"));
@@ -293,6 +295,7 @@ void SettingsStore::savePinyin(const PinyinSettings &settings) {
                     "0=Default"});
     }
     setIniValue(path, "", "PageSize", std::to_string(settings.pageSize));
+    setIniValue(path, "", "ShuangpinProfile", settings.shuangpinProfile);
     setIniValue(path, "Fuzzy", "Z_ZH",
                 settings.fuzzyZ ? "True" : "False");
     setIniValue(path, "Fuzzy", "C_CH",

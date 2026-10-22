@@ -834,6 +834,37 @@ void SettingsWindow::drawUi() {
         }
         ImGui::TextDisabled(
             "支持拼音、双拼、五笔、仓颉等；选择后点“应用”。");
+        ImGui::Dummy(ImVec2(0, 6.0f * scale));
+
+        ImGui::TextUnformatted("双拼方案");
+        ImGui::SetNextItemWidth(260.0f * scale);
+        const struct {
+            const char *id;
+            const char *label;
+        } shuangpinOptions[] = {
+            {"Ziranma", "自然码"},       {"MS", "微软双拼"},
+            {"Ziguang", "紫光双拼"},     {"ABC", "智能 ABC"},
+            {"Zhongwenzhixing", "中文之星"},
+            {"PinyinJiajia", "拼音加加"},
+            {"Xiaohe", "小鹤双拼"},      {"GB", "国标双拼"},
+        };
+        const char *shuangpinLabel = "自然码";
+        for (const auto &option : shuangpinOptions) {
+            if (pinyin_.shuangpinProfile == option.id) {
+                shuangpinLabel = option.label;
+            }
+        }
+        if (ImGui::BeginCombo("##shuangpin-profile", shuangpinLabel)) {
+            for (const auto &option : shuangpinOptions) {
+                const bool selected =
+                    pinyin_.shuangpinProfile == option.id;
+                if (ImGui::Selectable(option.label, selected)) {
+                    pinyin_.shuangpinProfile = option.id;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::TextDisabled("仅在切换到双拼输入法时生效。");
         ImGui::Dummy(ImVec2(0, 8.0f * scale));
 
         ImGui::TextUnformatted("每页候选数");

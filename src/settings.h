@@ -15,6 +15,7 @@ struct SyncConfig {
 
 struct PinyinSettings {
     std::string defaultInputMethod = "pinyin";
+    std::string shuangpinProfile = "Ziranma";
     int pageSize = 7;
     bool fuzzyZ = false;
     bool fuzzyC = false;
