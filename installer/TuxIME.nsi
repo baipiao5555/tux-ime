@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APP_NAME "Tux IME"
-!define APP_VERSION "0.9.1"
+!define APP_VERSION "0.9.2"
 !define APP_PUBLISHER "Tux IME Project"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TuxIME"
 !define DIST_DIR "..\dist\TuxIME-final"
@@ -48,6 +48,10 @@ Section "Tux IME" SecMain
     SetShellVarContext all
     SetOutPath "$INSTDIR"
     nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
+    IfFileExists "$INSTDIR\bin\tuxime-x86_64.dll" 0 tux_no_old_dll
+    Delete "$INSTDIR\bin\tuxime-x86_64.old.dll"
+    Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.old.dll"
+    tux_no_old_dll:
     File /r "${DIST_DIR}\*.*"
 
     ${If} ${RunningX64}
@@ -85,5 +89,7 @@ Section "Uninstall"
     DeleteRegKey HKLM "Software\TuxIME"
     Delete "$SMPROGRAMS\Tux IME\Tux IME 设置.lnk"
     RMDir "$SMPROGRAMS\Tux IME"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
     RMDir /r "$INSTDIR"
 SectionEnd

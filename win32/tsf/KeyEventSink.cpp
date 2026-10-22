@@ -55,8 +55,14 @@ public:
         RECT rect{};
         BOOL clipped = FALSE;
         const HRESULT result = view->GetTextExt(ec, range, &rect, &clipped);
-        if (FAILED(result) || rect.bottom <= rect.top) {
+        if (FAILED(result) || (rect.left == 0 && rect.top == 0)) {
             return E_FAIL;
+        }
+        if (rect.bottom <= rect.top) {
+            rect.bottom = rect.top + 1;
+        }
+        if (rect.right < rect.left) {
+            rect.right = rect.left;
         }
 
         HWND foreground = GetForegroundWindow();
