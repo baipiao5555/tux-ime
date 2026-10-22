@@ -152,6 +152,24 @@ std::wstring chooseTextFile(bool save, const wchar_t *title) {
     return ok ? std::wstring(path) : std::wstring();
 }
 
+std::wstring chooseThemeFile(bool save, const wchar_t *title) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = GetActiveWindow();
+    dialog.lpstrFilter =
+        L"主题文件 (*.ini)\0*.ini\0所有文件 (*.*)\0*.*\0";
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrTitle = title;
+    dialog.lpstrDefExt = L"ini";
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER |
+                   (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    const BOOL ok = save ? GetSaveFileNameW(&dialog)
+                         : GetOpenFileNameW(&dialog);
+    return ok ? std::wstring(path) : std::wstring();
+}
+
 int windowDpi(HWND hwnd) {
     using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
     static auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
@@ -1080,11 +1098,45 @@ void SettingsWindow::drawUi() {
             tuxime::saveAppearance(appearance_);
             status_ = L"外观已保存";
         }
+        ImGui::SameLine();
+        if (ImGui::Button("导出主题")) {
+            const std::wstring path =
+                chooseThemeFile(true, L"导出候选窗主题");
+            if (!path.empty()) {
+                tuxime::saveAppearance(appearance_);
+                std::error_code error;
+                std::filesystem::copy_file(
+                    std::filesystem::path(tuxime::appearancePath()),
+                    std::filesystem::path(path),
+                    std::filesystem::copy_options::overwrite_existing,
+                    error);
+                status_ = error ? L"主题导出失败" : L"主题已导出";
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("导入主题")) {
+            const std::wstring path =
+                chooseThemeFile(false, L"导入候选窗主题");
+            if (!path.empty()) {
+                std::error_code error;
+                std::filesystem::copy_file(
+                    std::filesystem::path(path),
+                    std::filesystem::path(tuxime::appearancePath()),
+                    std::filesystem::copy_options::overwrite_existing,
+                    error);
+                if (error) {
+                    status_ = L"主题导入失败";
+                } else {
+                    appearance_ = tuxime::loadAppearance();
+                    status_ = L"主题已导入";
+                }
+            }
+        }
     } else {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.14.0");
+        ImGui::TextUnformatted("Tux IME 0.14.1");
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
