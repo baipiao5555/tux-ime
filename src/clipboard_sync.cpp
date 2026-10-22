@@ -34,6 +34,32 @@ std::wstring toWide(const std::string &text) {
     return result;
 }
 
+// SyncClipboard servers on Chinese Windows may store the JSON fields in the
+// system ANSI code page while the clipboard hash is calculated from UTF-8.
+// Decode UTF-8 first and fall back to CP_ACP only for invalid UTF-8.
+std::wstring toWideJson(const std::string &text) {
+    if (text.empty()) {
+        return {};
+    }
+    UINT codePage = CP_UTF8;
+    DWORD flags = MB_ERR_INVALID_CHARS;
+    int size = MultiByteToWideChar(codePage, flags, text.data(),
+                                   static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0) {
+        codePage = CP_ACP;
+        flags = 0;
+        size = MultiByteToWideChar(codePage, flags, text.data(),
+                                   static_cast<int>(text.size()), nullptr, 0);
+    }
+    if (size <= 0) {
+        return {};
+    }
+    std::wstring result(size, L'\0');
+    MultiByteToWideChar(codePage, flags, text.data(),
+                        static_cast<int>(text.size()), result.data(), size);
+    return result;
+}
+
 std::string toUtf8(const std::wstring &text) {
     if (text.empty()) {
         return {};
@@ -571,7 +597,7 @@ HttpResponse performRequest(const std::string &method,
         response.error = L"无法初始化 WinHTTP。";
         return response;
     }
-    WinHttpSetTimeouts(session, 5000, 5000, 5000, 10000);
+    WinHttpSetTimeouts(session, 10000, 10000, 15000, 30000);
 
     HINTERNET connection =
         WinHttpConnect(session, host.c_str(), components.nPort, 0);
@@ -1023,7 +1049,7 @@ void ClipboardSync::poll() {
     jsonString(response.body, "type", type);
     jsonString(response.body, "hash", hashUtf8);
     if (type == "Text" && jsonString(response.body, "text", textUtf8)) {
-        const std::wstring text = toWide(textUtf8);
+        const std::wstring text = toWideJson(textUtf8);
         const std::wstring hash =
             hashUtf8.empty() ? sha256Hex(text) : toWide(hashUtf8);
         if (hash == lastHash_ || hash == lastAppliedHash_) {
@@ -1099,7 +1125,14 @@ void ClipboardSync::run() {
     AddClipboardFormatListener(hwnd_);
     SetTimer(hwnd_, 1, 3000, nullptr);
 
-    onClipboardUpdate();
+    // Record the existing clipboard as the baseline before the first pull.
+    // Otherwise a stale local clipboard is uploaded at startup and can
+    // overwrite the newer content already stored on the server.
+    const std::wstring initial = readClipboardText();
+    if (!initial.empty()) {
+        lastHash_ = sha256Hex(initial);
+        addHistory(initial);
+    }
     poll();
 
     if (stopping_) {
