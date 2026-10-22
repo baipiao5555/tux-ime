@@ -22,6 +22,7 @@ add_executable(tuxime-server
     settings.cpp
     clipboard_sync.cpp
     clipboard_image.cpp
+    update_check.cpp
     tray.cpp
 )
 target_include_directories(tuxime-server PRIVATE "${CMAKE_SOURCE_DIR}")

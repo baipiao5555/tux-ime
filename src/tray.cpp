@@ -21,8 +21,10 @@
 
 #include "clipboard_sync.h"
 #include "common/appearance.h"
+#include "common/version.h"
 #include "server.h"
 #include "settings.h"
+#include "update_check.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -254,6 +256,8 @@ private:
     tuxime::Appearance appearance_;
     int page_ = 0;
     std::wstring status_;
+    std::wstring updateVersion_;
+    std::wstring updateUrl_;
 };
 
 void TrayIcon::Impl::run() {
@@ -1136,7 +1140,7 @@ void SettingsWindow::drawUi() {
         ImGui::TextColored(ImVec4(0.12f, 0.34f, 0.62f, 1.0f), "关于");
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
-        ImGui::TextUnformatted("Tux IME 0.14.1");
+        ImGui::TextUnformatted("Tux IME " TUX_IME_VERSION);
         ImGui::TextDisabled("Fcitx5 5.1.22 / libime 1.1.17 / "
                             "fcitx5-chinese-addons 5.1.15");
         ImGui::Dummy(ImVec2(0, 6.0f * scale));
@@ -1144,6 +1148,32 @@ void SettingsWindow::drawUi() {
             "独立 TSF 输入法，不与小狼毫共用 CLSID、DLL 或管道。");
         ImGui::TextUnformatted(
             "项目地址：https://github.com/baipiao5555/tux-ime");
+        ImGui::Dummy(ImVec2(0, 8.0f * scale));
+        if (ImGui::Button("检查更新")) {
+            const auto result = tuxime::checkLatestRelease();
+            if (!result.ok) {
+                status_ = result.error;
+                updateVersion_.clear();
+                updateUrl_.clear();
+            } else if (result.hasUpdate) {
+                updateVersion_ = result.version;
+                updateUrl_ = result.url;
+                status_ = L"发现新版本 " + result.version;
+            } else {
+                updateVersion_.clear();
+                updateUrl_.clear();
+                status_ = L"已经是最新版本";
+            }
+        }
+        if (!updateUrl_.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("打开下载页")) {
+                ShellExecuteW(nullptr, L"open", updateUrl_.c_str(), nullptr,
+                              nullptr, SW_SHOWNORMAL);
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", toUtf8(updateVersion_).c_str());
+        }
     }
 
     ImGui::EndChild();
