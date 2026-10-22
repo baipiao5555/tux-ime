@@ -4,7 +4,8 @@ namespace {
 
 class CaretSession final : public ITfEditSession {
 public:
-    explicit CaretSession(ITfContext *context) : context_(context) {}
+    CaretSession(ITfContext *context, ITfComposition *composition)
+        : context_(context), composition_(composition) {}
 
     STDMETHODIMP QueryInterface(REFIID riid, void **object) override {
         if (!object) {
@@ -33,21 +34,47 @@ public:
         if (FAILED(context_->GetActiveView(&view)) || !view) {
             return E_FAIL;
         }
-        TF_SELECTION selection{};
-        ULONG fetched = 0;
-        if (FAILED(context_->GetSelection(ec, TF_DEFAULT_SELECTION, 1,
-                                          &selection, &fetched)) ||
-            fetched == 0 || !selection.range) {
-            return E_FAIL;
+
+        CComPtr<ITfRange> range;
+        if (composition_) {
+            if (FAILED(composition_->GetRange(&range)) || !range) {
+                return E_FAIL;
+            }
+            range->Collapse(ec, TF_ANCHOR_START);
+        } else {
+            TF_SELECTION selection{};
+            ULONG fetched = 0;
+            if (FAILED(context_->GetSelection(ec, TF_DEFAULT_SELECTION, 1,
+                                              &selection, &fetched)) ||
+                fetched == 0 || !selection.range) {
+                return E_FAIL;
+            }
+            range.Attach(selection.range);
         }
+
         RECT rect{};
         BOOL clipped = FALSE;
-        const HRESULT result =
-            view->GetTextExt(ec, selection.range, &rect, &clipped);
-        selection.range->Release();
+        const HRESULT result = view->GetTextExt(ec, range, &rect, &clipped);
         if (FAILED(result) || rect.bottom <= rect.top) {
             return E_FAIL;
         }
+
+        HWND foreground = GetForegroundWindow();
+        RECT windowRect{};
+        if (foreground && GetWindowRect(foreground, &windowRect) &&
+            (rect.left < windowRect.left || rect.left > windowRect.right ||
+             rect.top < windowRect.top || rect.top > windowRect.bottom)) {
+            POINT caret{};
+            if (GetCaretPos(&caret)) {
+                const int offsetX = windowRect.left - rect.left + caret.x;
+                const int offsetY = windowRect.top - rect.top + caret.y;
+                rect.left += offsetX;
+                rect.right += offsetX;
+                rect.top += offsetY;
+                rect.bottom += offsetY;
+            }
+        }
+
         rect_ = rect;
         valid_ = true;
         return S_OK;
@@ -60,6 +87,7 @@ private:
     ~CaretSession() = default;
     LONG refCount_ = 1;
     CComPtr<ITfContext> context_;
+    CComPtr<ITfComposition> composition_;
     RECT rect_{};
     bool valid_ = false;
 };
@@ -161,7 +189,7 @@ bool Tsf::requestEditSession() {
 RECT Tsf::caretRect() const {
     if (textEditSinkContext_ && clientId_ != TF_CLIENTID_NULL) {
         CComPtr<CaretSession> session;
-        session.Attach(new CaretSession(textEditSinkContext_));
+        session.Attach(new CaretSession(textEditSinkContext_, composition_));
         HRESULT sessionResult = E_FAIL;
         if (SUCCEEDED(textEditSinkContext_->RequestEditSession(
                 clientId_, session, TF_ES_SYNC | TF_ES_READ,
