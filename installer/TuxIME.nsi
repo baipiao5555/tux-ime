@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APP_NAME "Tux IME"
-!define APP_VERSION "0.9.3"
+!define APP_VERSION "1.0.0"
 !define APP_PUBLISHER "Tux IME Project"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TuxIME"
 !define DIST_DIR "..\dist\TuxIME-final"
@@ -53,9 +53,14 @@ Section "Tux IME" SecMain
     Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.old.dll"
     tux_no_old_dll:
     File /r "${DIST_DIR}\*.*"
+    File "setup-language.ps1"
+    ; The previous DLL can stay locked by a running TSF client. It is no
+    ; longer referenced, so remove it now or at the next reboot.
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
 
     ${If} ${RunningX64}
         ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /s "$INSTDIR\bin\tuxime-x86_64.dll"'
+        ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\setup-language.ps1"'
     ${EndIf}
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -80,16 +85,36 @@ SectionEnd
 Section "Uninstall"
     SetShellVarContext all
     SetRegView 64
-    nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
     ${If} ${RunningX64}
+        ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\setup-language.ps1" -Remove'
         ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /u /s "$INSTDIR\bin\tuxime-x86_64.dll"'
     ${EndIf}
+
+    ; A TSF client in a still-running application can relaunch the old server
+    ; right after taskkill. Rename the executables first so it cannot come
+    ; back from the path we are about to delete.
+    nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
+    IfFileExists "$INSTDIR\bin\tuxime-server.exe" 0 tux_no_server_rename
+    Rename "$INSTDIR\bin\tuxime-server.exe" "$INSTDIR\bin\tuxime-server.uninstall.exe"
+    tux_no_server_rename:
+    Delete "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
+    IfFileExists "$INSTDIR\bin\tuxime-x86_64.dll" 0 tux_no_dll_rename
+    Rename "$INSTDIR\bin\tuxime-x86_64.dll" "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
+    tux_no_dll_rename:
+    nsExec::ExecToLog 'taskkill /IM tuxime-server.exe /F'
+    nsExec::ExecToLog 'taskkill /IM tuxime-server.uninstall.exe /F'
+    Sleep 500
 
     DeleteRegKey HKLM "${APP_KEY}"
     DeleteRegKey HKLM "Software\TuxIME"
     Delete "$SMPROGRAMS\Tux IME\Tux IME 设置.lnk"
     RMDir "$SMPROGRAMS\Tux IME"
-    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.dll"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-server.uninstall.exe"
+    Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.uninstall.dll"
     Delete /REBOOTOK "$INSTDIR\bin\tuxime-x86_64.old.dll"
     RMDir /r "$INSTDIR"
+    RMDir /REBOOTOK "$INSTDIR\bin"
+    RMDir /REBOOTOK "$INSTDIR\lib"
+    RMDir /REBOOTOK "$INSTDIR\data"
+    RMDir /REBOOTOK "$INSTDIR"
 SectionEnd

@@ -17,6 +17,34 @@ $env:TUX_PREFIX = $Prefix
 $env:PKG_CONFIG_PATH = Join-Path $clang "lib/pkgconfig"
 $env:PATH = "$(Join-Path $Prefix 'bin');$(Join-Path $BuildRoot 'libime/bin');$(Join-Path $BuildRoot 'chinese/bin');$(Join-Path $clang 'bin');$env:PATH"
 
+function Import-VsDevEnvironment {
+    if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
+        return
+    }
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} `
+        "Microsoft Visual Studio/Installer/vswhere.exe"
+    if (-not (Test-Path $vswhere)) {
+        return
+    }
+    $vsPath = & $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath
+    if (-not $vsPath) {
+        return
+    }
+    $devCmd = Join-Path $vsPath "Common7/Tools/VsDevCmd.bat"
+    if (-not (Test-Path $devCmd)) {
+        return
+    }
+    $envLines = cmd /c "`"$devCmd`" -arch=x64 -host_arch=x64 >nul && set"
+    foreach ($line in $envLines) {
+        if ($line -match '^([^=]+)=(.*)$') {
+            Set-Item -Path "Env:$($matches[1])" -Value $matches[2] `
+                -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Invoke-Step {
     param([string]$Name, [scriptblock]$Body)
     Write-Host "==> $Name" -ForegroundColor Cyan
@@ -85,9 +113,23 @@ Invoke-Step "fcitx5-chinese-addons" {
 
 if (-not $SkipWin32) {
     Invoke-Step "TSF frontend" {
+        Import-VsDevEnvironment
+        if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+            throw "MSVC cl.exe not found. Install Visual Studio Build Tools with the C++ workload."
+        }
+        $win32Cache = Join-Path $BuildRoot "win32/CMakeCache.txt"
+        if (Test-Path $win32Cache) {
+            $compiler = Select-String -Path $win32Cache `
+                -Pattern '^CMAKE_CXX_COMPILER:FILEPATH=(.+)$' |
+                Select-Object -First 1
+            if ($compiler -and $compiler.Matches[0].Groups[1].Value -notmatch 'cl\.exe$') {
+                Remove-Item (Join-Path $BuildRoot "win32") -Recurse -Force
+            }
+        }
         & cmake @("-B", (Join-Path $BuildRoot "win32"), "-G", "Ninja",
             "-S", (Join-Path $root "win32"), "-DCMAKE_BUILD_TYPE=Release",
-            "-DTUX_USE_MSVC=ON")
+            "-DTUX_USE_MSVC=ON", "-DCMAKE_C_COMPILER=cl",
+            "-DCMAKE_CXX_COMPILER=cl")
         cmake --build (Join-Path $BuildRoot "win32")
     }
 }
