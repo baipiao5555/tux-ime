@@ -1559,7 +1559,40 @@ void SettingsWindow::drawUi() {
             SettingsStore::saveTableOptions(tableMethod_, tableOptions_);
             restartServer();
         }
-        ImGui::TextDisabled("配置文件：table/<方案>.conf");
+        ImGui::SameLine();
+        if (ImGui::Button("导入扩展词库")) {
+            const std::wstring path =
+                chooseTextFile(false, L"导入码表扩展词库");
+            if (!path.empty()) {
+                const auto extraDir =
+                    SettingsStore::appDataDir().parent_path() / "Fcitx5" /
+                    "table" /
+                    std::filesystem::path(tableMethod_ + ".dict.d");
+                std::error_code error;
+                std::filesystem::create_directories(extraDir, error);
+                const auto target =
+                    extraDir /
+                    std::filesystem::path("import-" + tableMethod_ + ".txt");
+                if (!error) {
+                    std::filesystem::copy_file(
+                        std::filesystem::path(path), target,
+                        std::filesystem::copy_options::overwrite_existing,
+                        error);
+                }
+                status_ = error ? L"扩展词库导入失败"
+                                : L"扩展词库已导入，保存并重启后生效";
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("打开码表目录")) {
+            const std::wstring directory =
+                (SettingsStore::appDataDir().parent_path() / "Fcitx5" /
+                 "table")
+                    .wstring();
+            ShellExecuteW(nullptr, L"open", directory.c_str(), nullptr,
+                          nullptr, SW_SHOWNORMAL);
+        }
+        ImGui::TextDisabled("配置文件：table/<方案>.conf；扩展词库：每行 编码 文本");
     } else if (page_ == 6) {
         if (!diagnosticsRun_) {
             runDiagnostics();
