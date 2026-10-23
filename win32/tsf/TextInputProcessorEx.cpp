@@ -42,6 +42,16 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
             applyServerResult(result);
         }
     });
+    candidateWindow_->setPageCallback([this](int delta) {
+        if (!server_) {
+            return;
+        }
+        const ServerKeyResult result = server_->sendKey(
+            delta > 0 ? VK_NEXT : VK_PRIOR, 0, false);
+        if (result.ok) {
+            applyServerResult(result);
+        }
+    });
 
     if (!initThreadMgrEventSink()) {
         goto ActivateExError;

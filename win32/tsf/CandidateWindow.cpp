@@ -167,6 +167,11 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
     const float candidateHeight =
         (std::max)(36.0f, appearance.fontSize * 2.2f) * scale;
     const float verticalGap = 2.0f * scale;
+    const float arrowWidth = 20.0f * scale;
+    const float pageGap = 4.0f * scale;
+    const bool showPageButtons = statusHeight > 0.0f && pageCallback_;
+    const float pageControlsWidth =
+        showPageButtons ? arrowWidth * 2.0f + pageGap + 6.0f * scale : 0.0f;
     const float height =
         appearance.vertical
             ? statusHeight + padding * 2.0f +
@@ -244,7 +249,8 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
         measure.MeasureString(status.c_str(), -1, &statusFont,
                               Gdiplus::PointF(0, 0), &format, &statusBounds);
         totalWidth = (std::max)(totalWidth,
-                                padding * 2.0f + statusBounds.Width);
+                                padding * 2.0f + statusBounds.Width +
+                                    pageControlsWidth);
     }
     ReleaseDC(nullptr, screen);
 
@@ -306,6 +312,7 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
             1.0f * scale);
         graphics.DrawPath(&border, &backgroundPath);
 
+        hitRanges_.clear();
         if (!status.empty() && appearance.showStatus) {
             Gdiplus::SolidBrush statusBrush(
                 appearance.customColors
@@ -316,10 +323,30 @@ void CandidateWindow::render(const std::vector<ServerCandidate> &candidates,
             graphics.DrawString(status.c_str(), -1, &statusFont,
                                 Gdiplus::PointF(padding, 3.0f * scale),
                                 &statusBrush);
+            if (showPageButtons) {
+                Gdiplus::StringFormat centered;
+                centered.SetAlignment(Gdiplus::StringAlignmentCenter);
+                centered.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                const float leftX =
+                    static_cast<float>(windowWidth) - padding -
+                    pageControlsWidth + 3.0f * scale;
+                const float rightX = leftX + arrowWidth + pageGap;
+                const Gdiplus::RectF leftRect(leftX, 0.0f, arrowWidth,
+                                              statusHeight);
+                const Gdiplus::RectF rightRect(rightX, 0.0f, arrowWidth,
+                                               statusHeight);
+                graphics.DrawString(L"<", -1, &statusFont, leftRect,
+                                    &centered, &statusBrush);
+                graphics.DrawString(L">", -1, &statusFont, rightRect,
+                                    &centered, &statusBrush);
+                hitRanges_.push_back(
+                    {leftX, leftX + arrowWidth, 0.0f, statusHeight, -1});
+                hitRanges_.push_back(
+                    {rightX, rightX + arrowWidth, 0.0f, statusHeight, 1});
+            }
         }
 
         float itemX = padding;
-        hitRanges_.clear();
         for (size_t i = 0; i < candidates.size(); ++i) {
             const auto &item = layout[i];
             const bool isSelected = static_cast<int>(i) == selected;
@@ -482,7 +509,11 @@ LRESULT CALLBACK CandidateWindow::windowProc(HWND hwnd, UINT message,
                 const auto &range = self->hitRanges_[i];
                 if (point.x >= range.left && point.x <= range.right &&
                     point.y >= range.top && point.y <= range.bottom) {
-                    self->selectCallback_(static_cast<int>(i));
+                    if (range.pageDelta != 0 && self->pageCallback_) {
+                        self->pageCallback_(range.pageDelta);
+                    } else {
+                        self->selectCallback_(static_cast<int>(i));
+                    }
                     break;
                 }
             }

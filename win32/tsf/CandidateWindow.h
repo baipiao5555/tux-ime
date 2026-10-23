@@ -22,6 +22,9 @@ public:
     void setSelectCallback(std::function<void(int)> callback) {
         selectCallback_ = std::move(callback);
     }
+    void setPageCallback(std::function<void(int)> callback) {
+        pageCallback_ = std::move(callback);
+    }
     void hide();
     bool visible() const { return hwnd_ != nullptr && IsWindowVisible(hwnd_); }
 
@@ -36,11 +39,13 @@ private:
     HWND hwnd_ = nullptr;
     ULONG_PTR gdiplusToken_ = 0;
     std::function<void(int)> selectCallback_;
+    std::function<void(int)> pageCallback_;
     struct HitRange {
         float left;
         float right;
         float top;
         float bottom;
+        int pageDelta = 0;
     };
     std::vector<HitRange> hitRanges_;
 };
